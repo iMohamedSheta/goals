@@ -25,7 +25,7 @@ import {
   BackupNow, ListDriveBackups, DeleteDriveBackup, RestoreDriveBackup, ImportDatabaseFile,
   GetVersion, CheckForUpdates, DownloadUpdate, InstallUpdateAndRestart,
 } from '../wailsjs/go/main/App';
-import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload } from '../wailsjs/runtime/runtime';
+import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload, WindowUnfullscreen, WindowUnmaximise, WindowMaximise, WindowIsFullscreen, WindowIsMaximised } from '../wailsjs/runtime/runtime';
 
 export default function App() {
   const [lang, setLang] = React.useState(() => localStorage.getItem('goals-lang') || 'ar');
@@ -274,10 +274,30 @@ export default function App() {
   };
 
   // dock the mini window to the screen's end edge, vertically centered
+  // A maximized/fullscreen window ignores WindowSetSize, so always step out
+  // of fullscreen/maximized first (with a beat for the OS to apply it).
+  const safeFlag = (fn) => {
+    try {
+      return Promise.resolve(fn()).catch(() => false);
+    } catch {
+      return Promise.resolve(false);
+    }
+  };
+  const leaveFullWindow = async () => {
+    const [fs, mx] = await Promise.all([safeFlag(WindowIsFullscreen), safeFlag(WindowIsMaximised)]);
+    if (fs) { try { WindowUnfullscreen(); } catch { /* noop */ } }
+    if (mx) { try { WindowUnmaximise(); } catch { /* noop */ } }
+    if (fs || mx) await new Promise((r) => setTimeout(r, 180));
+    return { wasFullscreen: fs, wasMaximised: mx };
+  };
+  // remembers how the main window looked before entering mini, so exitMini
+  // can put it back (e.g. re-maximize if it was maximized)
+  const miniReturnRef = React.useRef({ wasMaximised: false });
   const applyMiniWindow = async (mode) => {
     const s = MINI_SIZES[mode];
     if (!s) return;
     try {
+      await leaveFullWindow();
       WindowSetAlwaysOnTop(true);
       WindowSetMinSize(s.minW, s.minH);
       WindowSetSize(s.w, s.h);
@@ -294,8 +314,13 @@ export default function App() {
     } catch { /* noop */ }
   };
 
-  const enterMini = () => {
+  const enterMini = async () => {
     if (!active) return;
+    // capture pre-mini state before applyMiniWindow clears it
+    try {
+      const [fs, mx] = await Promise.all([safeFlag(WindowIsFullscreen), safeFlag(WindowIsMaximised)]);
+      miniReturnRef.current = { wasMaximised: !!(fs || mx) };
+    } catch { /* noop */ }
     setMiniMode('widget');
     applyMiniWindow('widget');
   };
@@ -313,6 +338,11 @@ export default function App() {
       WindowSetAlwaysOnTop(false);
       WindowSetSize(1280, 800);
       WindowSetMinSize(940, 600);
+      if (miniReturnRef.current.wasMaximised) {
+        // let the resize land first, then restore maximized state
+        setTimeout(() => { try { WindowMaximise(); } catch { /* noop */ } }, 120);
+        miniReturnRef.current = { wasMaximised: false };
+      }
     } catch { /* noop */ }
   };
 
