@@ -52,7 +52,7 @@ export function LiveTime({ task, elapsed: elapsedProp, max, className, overClass
     <>
       <span className={cn('tabular', className, over && (overClassName || 'text-red-400'))}>{formatHMS(secs)}</span>
       {showBadge && over && (
-        <span className="inline-flex shrink-0 items-center rounded-md border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-bold text-red-400">
+        <span className={cn('inline-flex shrink-0 items-center border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-bold text-red-400', RADIUS_SM)}>
           {badgeLabel}
         </span>
       )}
@@ -73,7 +73,7 @@ export function dueInfo(task, t) {
 export function ContextBadge({ name, color, ap }) {
   if (!name) return <span className="text-xs text-muted-foreground">—</span>;
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary font-medium text-secondary-foreground', density(ap).badge, animClass(ap))}>
+    <span className={cn('inline-flex items-center gap-1.5 border border-border bg-secondary font-medium text-secondary-foreground', RADIUS, density(ap).badge, animClass(ap))}>
       <span className="size-1.5 rounded-full" style={{ background: color }} />
       <span className="max-w-[110px] truncate">{name}</span>
     </span>
@@ -162,7 +162,7 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <ContextBadge ap={ap} name={context?.name || task.contextName} color={context?.color || task.contextColor || '#6366f1'} />
             {task.focus && (
-              <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 font-semibold text-amber-400', d.badge, animClass(ap))}>
+              <span className={cn('inline-flex shrink-0 items-center gap-1 border border-amber-500/30 bg-amber-500/10 font-semibold text-amber-400', RADIUS, d.badge, animClass(ap))}>
                 <Star size={10} fill="currentColor" /> {t.focusBadge}
               </span>
             )}
@@ -223,7 +223,7 @@ const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit,
       <div className="flex shrink-0 items-center gap-2 px-3.5 pb-2.5 pt-3.5">
         <Icon size={15} className="text-muted-foreground" />
         <span className="text-[13px] font-semibold">{t[status]}</span>
-        <span className="tabular ms-auto rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+        <span className={cn('tabular ms-auto bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground', RADIUS)}>
           {tasks.length}
         </span>
       </div>

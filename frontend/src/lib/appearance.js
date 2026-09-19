@@ -176,7 +176,7 @@ export function hoverShadowClass(a) {
 /** status-filter chip — density-aware padding/text, accent-aware active state */
 export function filterChipClass(a, isActive) {
   const d = density(a);
-  const base = `rounded-full border font-medium ${d.chip} ${animClass(a)}`;
+  const base = `${RADIUS} border font-medium ${d.chip} ${animClass(a)}`;
   return isActive
     ? `${base} border-primary/50 bg-primary/15 text-primary`
     : `${base} border-border bg-transparent text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground`;

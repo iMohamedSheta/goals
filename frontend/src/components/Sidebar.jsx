@@ -2,6 +2,7 @@ import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, P
 import { cn } from '../lib/utils';
 import { Progress } from './ui/form';
 import { horizonName, horizonDesc } from '../lib/i18n';
+import { RADIUS, animClass, DEFAULT_APPEARANCE } from '../lib/appearance';
 
 export const HORIZON_ICONS = { short: CalendarDays, medium: CalendarRange, long: Rocket };
 const FALLBACK_ICONS = [Flag, Target, Compass, Hourglass];
@@ -18,6 +19,7 @@ export function Sidebar({
   contextFilter, onContextFilter, dbPath, onOpenFolder,
   timerRunning, onQuit, onSettings,
   version, updateAvailable, onOpenUpdates,
+  ap = DEFAULT_APPEARANCE,
 }) {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e bg-card/50">
@@ -69,7 +71,9 @@ export function Sidebar({
                       <span className="tabular mt-1 block text-[11px] leading-none text-muted-foreground">{t.horizonSub(hz.defaultDays, c.done, c.total)}</span>
                     </span>
                     <span className={cn(
-                      'tabular rounded-full px-1.5 py-0.5 text-[11px] font-semibold',
+                      'tabular px-1.5 py-0.5 text-[11px] font-semibold',
+                      RADIUS,
+                      animClass(ap),
                       active ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
                     )}>
                       {c.total}
@@ -93,7 +97,7 @@ export function Sidebar({
                 <Star size={15} fill={focusOnly ? 'currentColor' : 'none'} />
               </span>
               <span className="flex-1 text-[13px] font-semibold">{t.focus}</span>
-              <span className="tabular rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+              <span className={cn('tabular bg-secondary px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground', RADIUS, animClass(ap))}>
                 {focusedCount}
               </span>
             </button>

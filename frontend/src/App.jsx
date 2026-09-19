@@ -13,7 +13,7 @@ import { SettingsSheet } from './components/SettingsSheet';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
 import {
   DEFAULT_APPEARANCE, loadLocalAppearance, saveLocalAppearance, applyAppearance,
-  fromSettingsMap, settingsDiff, filterChipClass, density, animClass,
+  fromSettingsMap, settingsDiff, filterChipClass, density, animClass, RADIUS,
 } from './lib/appearance';
 import {
   ListTasks, GetStats, ListContexts, CreateContext, UpdateContext, DeleteContext,
@@ -533,6 +533,7 @@ export default function App() {
       <Sidebar
         t={t}
         lang={lang}
+        ap={appearance}
         onLangToggle={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
         horizons={horizons}
         contexts={contexts}
@@ -617,7 +618,7 @@ export default function App() {
               {t.shownDone(boardTasks.length, boardTasks.filter((x) => x.status === 'done').length)}
             </span>
             {hasFilters && (
-              <button onClick={clearFilters} className={cn('flex items-center gap-1 rounded-full font-medium text-muted-foreground hover:text-foreground', density(appearance).chip, animClass(appearance))}>
+              <button onClick={clearFilters} className={cn('flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground', RADIUS, density(appearance).chip, animClass(appearance))}>
                 <X size={12} /> {t.clear}
               </button>
             )}

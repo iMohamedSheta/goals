@@ -114,7 +114,7 @@ function AppearanceTab({ t, value, dirty, onChange, onReset }) {
         <div className="mb-3 flex flex-wrap gap-1.5">
           {['Cairo', 'Tajawal', 'system'].map((f) => (
             <button key={f} onClick={() => onChange({ font: f })} style={{ fontFamily: FONTS[f] }}
-              className={cn('rounded-full border px-3.5 py-1.5 text-[13px] transition-all',
+              className={cn(RADIUS, 'border px-3.5 py-1.5 text-[13px] transition-all',
                 value.font === f ? 'border-primary bg-primary font-bold text-primary-foreground shadow-sm' : 'border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground')}>
               {f === 'system' ? t.fontSystem : f}
             </button>
@@ -231,9 +231,9 @@ function PlanningTab({ t, lang, horizons, onSave, onCreate, onDelete }) {
         <div key={r.key} className="rounded-xl border p-3.5">
           <div className="mb-2.5 flex items-center gap-2">
             <span className="text-sm font-bold">{horizonName(r, lang)}</span>
-            <span className="tabular rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">~{r.defaultDays}</span>
+            <span className={cn('tabular bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary', RADIUS)}>~{r.defaultDays}</span>
             {!BUILTINS.has(r.key) && (
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{t.customTab}</span>
+              <span className={cn('bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground', RADIUS)}>{t.customTab}</span>
             )}
             <span className="ms-auto" />
             <button
