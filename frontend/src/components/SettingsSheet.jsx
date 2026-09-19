@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   Moon, Sun, Monitor, Palette, Type, Square, Layers, Box,
   Sparkles, Maximize2, RotateCcw, Plus, Trash2, CalendarRange, Users,
+  Database, Cloud, Copy, Check, FolderOpen, Upload, Download, Bot,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -9,6 +10,7 @@ import { Sheet, SheetHeader, SheetBody, SheetFooter } from './ui/sheet';
 import { Input, Label } from './ui/form';
 import { ACCENTS, FONTS } from '../lib/appearance';
 import { horizonName } from '../lib/i18n';
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
 
 function Seg({ options, value, onPick }) {
   return (
@@ -344,19 +346,347 @@ function ContextsTab({ t, contexts, onCreate, onUpdate, onDelete }) {
   );
 }
 
+/* ---------------- data tab ---------------- */
+
+function fmtSize(n) {
+  n = n || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  try {
+    return new Date(s).toLocaleString();
+  } catch {
+    return s;
+  }
+}
+
+function DataTab({ t, dbPath, onOpenFolder, drive, onImportLocal, onAskRestore }) {
+  const [status, setStatus] = React.useState({ hasClient: false, connected: false });
+  const [creds, setCreds] = React.useState({ id: '', secret: '' });
+  const [backups, setBackups] = React.useState([]);
+  const [busy, setBusy] = React.useState('');
+  const [waiting, setWaiting] = React.useState(false);
+  const [device, setDevice] = React.useState(null);
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [copied, setCopied] = React.useState(false);
+  const pollRef = React.useRef(null);
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const st = await drive.getStatus();
+      setStatus(st || { hasClient: false, connected: false });
+      if (st?.connected) {
+        try {
+          setBackups((await drive.list()) || []);
+        } catch {
+          setBackups([]);
+        }
+      } else {
+        setBackups([]);
+      }
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, [drive]);
+
+  React.useEffect(() => {
+    refresh();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); drive.cancelAuth?.(); };
+  }, [refresh, drive]);
+
+  const stopPoll = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+    setWaiting(false);
+    setDevice(null);
+    try { drive.cancelAuth?.(); } catch { /* noop */ }
+  };
+
+  const connect = async () => {
+    setErr('');
+    setBusy('auth');
+    try {
+      const d = await drive.startAuth();
+      setDevice(d);
+      try { BrowserOpenURL(d.verificationUrl); } catch { /* user opens manually */ }
+      setWaiting(true);
+      const step = Math.max(3, d.interval || 5) * 1000;
+      const deadline = Date.now() + (d.expiresIn || 900) * 1000;
+      pollRef.current = setInterval(async () => {
+        if (Date.now() > deadline) { stopPoll(); setBusy(''); setErr(t.codeExpired); return; }
+        try {
+          const r = await drive.pollAuth();
+          if (!r) return;
+          if (r.status === 'success') {
+            stopPoll();
+            setBusy('');
+            await refresh();
+          } else if (r.status === 'expired') {
+            stopPoll();
+            setBusy('');
+            setErr(t.codeExpired);
+          } else if (r.status === 'denied') {
+            stopPoll();
+            setBusy('');
+            setErr(t.accessDenied);
+          }
+        } catch { /* keep waiting */ }
+      }, step);
+    } catch (e) {
+      setErr(String(e));
+      setBusy('');
+    }
+  };
+
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(dbPath || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setErr(dbPath || '');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {err && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-[13px] text-red-300" dir="ltr">{err}</div>
+      )}
+
+      <Section icon={Database} title={t.dbFile}>
+        <p dir="ltr" className="truncate rounded-md border bg-muted/40 px-3 py-2 text-xs tabular text-muted-foreground" title={dbPath}>
+          {dbPath}
+        </p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={copyPath}>
+            {copied ? <Check /> : <Copy />} {copied ? t.copied : t.copyPath}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => onOpenFolder()}>
+            <FolderOpen /> {t.openFolder}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={async () => {
+            setErr('');
+            const res = await onImportLocal();
+            if (res && !res.ok) setErr(res.error);
+          }}>
+            <Download /> {t.importLocal}
+          </Button>
+        </div>
+      </Section>
+
+      <Section icon={Cloud} title={t.driveTitle}>
+        {!status.embedded && (
+          <p className="mb-2.5 text-xs leading-relaxed text-muted-foreground">{t.driveDesc}</p>
+        )}
+        <div className="mb-1 flex items-center gap-2">
+          <span className={cn('size-2 rounded-full', status.connected ? 'bg-emerald-400' : 'bg-muted-foreground/50')} />
+          <span className="text-[13px] font-bold">{status.connected ? t.connectedAs : t.notConnected}</span>
+        </div>
+        {(!status.embedded || showAdvanced) && (
+          <>
+            <div className="grid grid-cols-1 gap-2.5">
+              <Field label="Client ID">
+                <Input dir="ltr" value={creds.id} onChange={(e) => setCreds((c) => ({ ...c, id: e.target.value }))} placeholder="xxxx.apps.googleusercontent.com" />
+              </Field>
+              <Field label="Client secret">
+                <Input dir="ltr" type="password" value={creds.secret} onChange={(e) => setCreds((c) => ({ ...c, secret: e.target.value }))} placeholder="••••••" />
+              </Field>
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button
+                variant="secondary" size="sm" disabled={!creds.id.trim() || !creds.secret.trim() || busy === 'auth'}
+                onClick={async () => {
+                  setErr('');
+                  try {
+                    await drive.saveCreds(creds.id.trim(), creds.secret.trim());
+                    await refresh();
+                  } catch (e) { setErr(String(e)); }
+                }}
+              >
+                {t.saveChanges}
+              </Button>
+            </div>
+          </>
+        )}
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {!status.connected ? (
+            <Button size="sm" disabled={busy === 'auth' || !status.hasClient} onClick={connect}>
+              <Cloud /> {waiting ? t.waitingAuth : t.connectGoogle}
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={async () => { await drive.disconnect(); setBackups([]); await refresh(); }}>
+              {t.disconnect}
+            </Button>
+          )}
+          {waiting && device && (
+            <Button variant="secondary" size="sm" onClick={() => { try { BrowserOpenURL(device.verificationUrl); } catch { /* noop */ } }}>
+              {t.openGoogle}
+            </Button>
+          )}
+          {waiting && (
+            <Button variant="ghost" size="sm" onClick={() => { stopPoll(); setBusy(''); }}>{t.cancel}</Button>
+          )}
+          {status.embedded && (
+            <button onClick={() => setShowAdvanced((v) => !v)} className="text-[11px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              {t.advancedSetup}
+            </button>
+          )}
+        </div>
+        {waiting && device && (
+          <div className="mt-2.5 rounded-xl border border-primary/30 bg-primary/5 p-3.5 text-center">
+            <p className="text-[11px] text-muted-foreground">{t.deviceHint}</p>
+            <p dir="ltr" className="tabular mt-1 text-3xl font-black tracking-[0.2em] text-primary">{device.userCode}</p>
+          </div>
+        )}
+
+        {status.connected && (
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[13px] font-bold">{t.backupsTitle}</span>
+              <Button size="sm" disabled={busy === 'backup'} onClick={async () => {
+                setErr('');
+                setBusy('backup');
+                try {
+                  await drive.backup();
+                  await refresh();
+                } catch (e) { setErr(String(e)); }
+                setBusy('');
+              }}>
+                <Upload /> {t.backupNow}
+              </Button>
+            </div>
+            {backups.length === 0 ? (
+              <p className="py-1 text-xs text-muted-foreground">{t.noBackups}</p>
+            ) : (
+              <div className="max-h-44 space-y-1.5 overflow-y-auto">
+                {backups.map((b) => (
+                  <div key={b.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p dir="ltr" className="truncate text-xs font-semibold">{b.name}</p>
+                      <p className="tabular text-[11px] text-muted-foreground">{fmtDate(b.created)} · {fmtSize(b.size)}</p>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => onAskRestore(b.id, b.name)}>{t.restore}</Button>
+                    <Button variant="ghost" size="icon-sm" className="hover:bg-destructive/10 hover:text-red-400"
+                      onClick={async () => { try { await drive.del(b.id); await refresh(); } catch (e) { setErr(String(e)); } }}>
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+/* ---------------- MCP / AI tab ---------------- */
+
+const MCP_TOOLS = [
+  'list_tasks', 'get_task', 'create_task', 'update_task', 'move_task', 'toggle_focus',
+  'delete_task', 'list_contexts', 'create_context', 'list_horizons', 'update_horizon',
+  'create_horizon', 'delete_horizon', 'focus_list', 'stats', 'start_timer', 'stop_timer',
+  'finish_task', 'active_timer', 'task_time', 'get_settings', 'set_setting',
+];
+
+function aiPromptText(exe) {
+  const cmd = (exe || '').replace(/\\/g, '\\\\');
+  return `Add my Goals desktop app as a global MCP server so you can manage my tasks from ANY project.
+
+Steps:
+1. Open your GLOBAL MCP config (opencode: ~/.config/opencode/opencode.jsonc — create it if missing).
+2. Merge this server into the top-level "mcp" object (keep every existing entry, delete nothing):
+{"goals": {"type": "local", "command": ["${cmd}", "mcp"], "enabled": true}}
+3. Restart the session (MCP servers connect at session start), then call the "stats" tool and summarize my tasks to confirm it works.
+
+Rules:
+- Never override GOALS_DB_PATH: the GUI and MCP must share the default database.
+- Horizons are planning tabs (short/medium/long or a custom key) — always pass a valid one when creating tasks.
+- Confirm with me before delete_task or delete_horizon.`;
+}
+
+function McpTab({ t, exePath }) {
+  const [copied, setCopied] = React.useState('');
+  const exe = exePath || 'goals.exe';
+  const quoted = exe.includes(' ') ? `"${exe}"` : exe;
+  const command = `${quoted} mcp`;
+  const globalJson = `{\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    "goals": {\n      "type": "local",\n      "command": ["${exe.replace(/\\/g, '\\\\')}", "mcp"],\n      "enabled": true\n    }\n  }\n}`;
+  const prompt = aiPromptText(exe);
+
+  const copy = async (key, text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied((c) => (c === key ? '' : c)), 1500);
+    } catch { /* noop */ }
+  };
+
+  const Block = ({ label, text, id }) => (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+        <Button variant="secondary" size="sm" onClick={() => copy(id, text)}>
+          {copied === id ? <Check /> : <Copy />} {copied === id ? t.copied : t.copyPath}
+        </Button>
+      </div>
+      <pre dir="ltr" className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border bg-muted/40 px-3 py-2.5 text-left text-[11px] leading-relaxed tabular">
+        {text}
+      </pre>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-bold">{t.mcpTitle}</h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.mcpDesc}</p>
+      </div>
+      <Block id="cmd" label={t.mcpCommandLabel} text={command} />
+      <Block id="global" label={t.mcpGlobalLabel} text={globalJson} />
+      <div>
+        <h3 className="text-sm font-bold">{t.mcpPromptTitle}</h3>
+        <p className="mb-1.5 mt-1 text-xs text-muted-foreground">{t.mcpPromptDesc}</p>
+        <Block id="prompt" label="PROMPT" text={prompt} />
+      </div>
+      <div>
+        <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          {t.mcpToolsLabel} ({MCP_TOOLS.length})
+        </span>
+        <div className="flex flex-wrap gap-1.5" dir="ltr">
+          {MCP_TOOLS.map((name) => (
+            <span key={name} className="rounded-md border bg-secondary px-2 py-0.5 text-[11px] tabular text-secondary-foreground">
+              {name}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{t.mcpRestartNote}</p>
+    </div>
+  );
+}
+
 /* ---------------- settings window ---------------- */
 
 const TABS = [
   { key: 'appearance', Icon: Palette },
   { key: 'planning', Icon: CalendarRange },
   { key: 'contexts', Icon: Users },
+  { key: 'data', Icon: Database },
+  { key: 'mcp', Icon: Bot },
 ];
 
 export function SettingsSheet(props) {
   const { t, open, onClose, tab, onTab } = props;
   if (!open) return null;
   return (
-    <Sheet open={open} onClose={onClose}>
+    <Sheet open={open} onClose={onClose} className="max-w-2xl">
       <SheetHeader title={t.settings} onClose={onClose} />
       <div className="flex gap-1 border-b px-6 pb-0 pt-1">
         {TABS.map((tb) => (
@@ -383,6 +713,13 @@ export function SettingsSheet(props) {
         {tab === 'contexts' && (
           <ContextsTab t={t} contexts={props.contexts} onCreate={props.onCreateContext} onUpdate={props.onUpdateContexts} onDelete={props.onDeleteContext} />
         )}
+        {tab === 'data' && (
+          <DataTab
+            t={t} dbPath={props.dbPath} onOpenFolder={props.onOpenFolder} drive={props.drive}
+            onImportLocal={props.onImportLocal} onAskRestore={props.onAskRestore}
+          />
+        )}
+        {tab === 'mcp' && <McpTab t={t} exePath={props.exePath} />}
       </SheetBody>
       <SheetFooter>
         <Button variant="ghost" onClick={onClose}>{t.close}</Button>

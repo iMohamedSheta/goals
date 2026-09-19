@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Circle, Timer as TimerIcon, AlertCircle, CheckCircle2, Star, Plus, Pencil, Trash2,
   CalendarClock, LayoutGrid, List as ListIcon, SearchX, Crosshair, Minus, Square, X,
-  Play, Pause, Check, PictureInPicture2, Maximize2,
+  Play, Pause, Check, PictureInPicture2, Maximize2, Minimize2, ChevronsUp,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Badge } from './ui/badge';
@@ -381,7 +381,7 @@ export function ActiveTimerPill({ t, active, onPause, onResume, onMini, onFinish
 }
 
 /** Full-window mini mode: only the timer. Window is small + always on top. */
-export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand }) {
+export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, onCollapse }) {
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex h-8 shrink-0 select-none items-center border-b px-1" style={{ ['--wails-draggable']: 'drag' }}>
@@ -414,11 +414,45 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand }) 
               <Button size="sm" variant="secondary" onClick={onResume}><Play /> {t.resumeTimer}</Button>
             )}
             <Button size="sm" onClick={() => onFinish(active)} className="bg-emerald-600 hover:bg-emerald-500"><Check /> {t.finishTask}</Button>
-            <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
+          <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
           </div>
+          {onCollapse && (
+            <button onClick={onCollapse} title={t.collapse} className="mt-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+              <Minimize2 size={12} /> {t.collapse}
+            </button>
+          )}
         </>
       )}
       </div>
+    </div>
+  );
+}
+
+/** Tiny side-docked horizontal bar: dot + time + title. Click expands to the side view. */
+export function TimerWidget({ t, active, onExpand }) {
+  return (
+    <div
+      className="flex h-full cursor-pointer items-center gap-2 bg-background px-2.5"
+      style={{ ['--wails-draggable']: 'drag' }}
+      onClick={onExpand}
+      onDoubleClick={onExpand}
+    >
+      {!active ? (
+        <>
+          <TimerIcon size={15} className="shrink-0 text-muted-foreground" />
+          <p className="truncate text-[11px] text-muted-foreground">{t.noActiveTimer}</p>
+        </>
+      ) : (
+        <>
+          <span className={active.timerStartedAt ? 'pulse-dot size-2 shrink-0 rounded-full bg-emerald-400 text-emerald-400' : 'size-2 shrink-0 rounded-full bg-amber-400'} />
+          <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="shrink-0 text-[13px] font-black tabular tracking-tight text-emerald-300" />
+          <p className="min-w-0 flex-1 truncate text-start text-[11px] font-semibold">{active.title}</p>
+          <span style={{ ['--wails-draggable']: 'no-drag' }} className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+            <button title={t.expand} onClick={onExpand} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><ChevronsUp size={14} /></button>
+            <button title={t.winHide} onClick={() => WindowHide()} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><X size={14} /></button>
+          </span>
+        </>
+      )}
     </div>
   );
 }

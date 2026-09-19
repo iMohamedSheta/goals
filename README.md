@@ -31,7 +31,9 @@ can read and manage your goals from any project. GUI and AI share one `goals.db`
 ## Run
 
 - GUI: double-click `build/bin/goals.exe`
-- Data: `goals.db` next to the exe (override with the `GOALS_DB_PATH` env var)
+- Data: `%APPDATA%\Goals\goals.db` (override with the `GOALS_DB_PATH` env var).
+  Databases left next to the exe by older versions are copied over automatically (never deleted).
+  Click the database line in the sidebar footer (or Settings → Data) to open the folder.
 - Rebuild: `wails build -platform windows/amd64 -o goals.exe`
 - If the app ever shows a blank page: open Task Manager, end **every** `goals.exe`
   (a stuck old instance holds the single-instance lock), then launch fresh.
@@ -53,6 +55,9 @@ can read and manage your goals from any project. GUI and AI share one `goals.db`
     (also controllable via MCP `get_settings` / `set_setting`)
   - **Planning**: edit all tabs + add/delete custom ones
   - **Contexts**: Work / Life / … manager (rename, recolor, add, delete)
+  - **Data**: database path (copy + open folder), local `.db` import, Google Drive backup
+  - **AI**: connect guide — server command, global opencode config, all 22 tools,
+    and a ready copy-paste prompt that makes any AI register the server itself
 - **Kanban + List**: toggle per tab; drag & drop between To Do / In Progress / Blocked / Done
 - **Focus mode**: ★ pin tasks, then ★ Focus to see only what matters
 - **Contexts**: Work / Life / Health / Learning seeded; filter chips per context.
@@ -240,18 +245,42 @@ Priority: `low|medium|high|urgent`.
   right-click it for Show / Quit.
 - Launching `goals.exe` again also restores the window (single-instance).
 - The window title always shows the live timer (`⏱ 12:34 · task name`); the tray tooltip does too.
-- The header pill (or ⧉ button) shrinks the app into a **mini always-on-top window**
-  showing only the active timer — pause / finish / expand from there.
+- The header pill (or ⧉ button) shrinks the app into a **tiny horizontal widget bar**
+  stuck to the screen edge (always-on-top: dot + live time + task, ~200px).
+  Click it to open the **side timer view** with full controls; collapse back or expand
+  to the full app from there.
 - Timer state checkpoints to SQLite every 30s, so even a kill loses almost nothing.
 - Sidebar ⏻ button stops the timer, saves, and quits for real.
 
 ## Data, troubleshooting
 
-- Database: `goals.db` next to the exe (`GOALS_DB_PATH` overrides). WAL mode — the
-  `-wal`/`-shm` sidecars are normal. Back it up by copying the `.db` file while the app is closed.
+- Database: `%APPDATA%\Goals\goals.db` (`GOALS_DB_PATH` overrides). Old exe-side databases
+  are auto-copied there on first launch. WAL mode — the `-wal`/`-shm` sidecars are normal.
+  Open the folder from the sidebar footer or Settings → Data.
 - Blank/dark window on launch → an old stuck instance is holding the single-instance lock:
   end **all** `goals.exe` in Task Manager, then launch fresh.
 - Frontend crashes render a red error panel and append to `%TEMP%\goals-error.log` — send that file when reporting a bug.
+
+## Google Drive backup
+
+Settings → Data → Google Drive. Sign-in runs on **`imohamedsheta/xsocial`'s Google
+Device flow**: click **Connect Google** → the app shows a short code and opens Google →
+enter the code → done. No localhost server, no firewall popups, and the token
+(with offline refresh) stays in your local database.
+
+The app ships with its OAuth client baked in and uses the least-privilege
+`drive.file` scope — it can only ever see the backup files it created itself,
+inside a "Goals Backups" folder. (An "advanced" section accepts your own
+client ID/secret override if you ever need it.)
+
+Then: **Back up now** uploads a clean snapshot (`goals-backup-YYYY-MM-DD-hhmmss.db`,
+taken via `VACUUM INTO` without closing anything). Each entry offers **Restore**
+(replaces the live DB after a validity check, then reloads) and delete.
+**Import file…** restores from a local `.db` file instead. Disconnecting only forgets
+the local token — Drive files stay untouched.
+
+No Google involved? Every launch also drops a timestamped snapshot into
+`%APPDATA%\Goals\backups` automatically (newest 7 kept) — zero-config safety net.
 
 ## Build from source
 

@@ -15,7 +15,7 @@ export function Sidebar({
   t, lang, onLangToggle,
   horizons, contexts, counts, focusedCount, stats,
   activeHorizon, onHorizon, focusOnly, onFocusToggle,
-  contextFilter, onContextFilter, dbPath,
+  contextFilter, onContextFilter, dbPath, onOpenFolder,
   timerRunning, onQuit, onSettings,
 }) {
   return (
@@ -155,11 +155,15 @@ export function Sidebar({
         >
           <Power size={15} /> {t.quit}
         </button>
-        <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-muted-foreground" title={dbPath}>
+        <button
+          onClick={() => onOpenFolder?.()}
+          title={`${t.openFolder}\n${dbPath || ''}`}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
           <Database size={12} className="shrink-0" />
-          <span className="truncate">{dbPath ? dbPath.split(/[/\\]/).slice(-2).join('/') : '…'}</span>
-          {stats && <span className="tabular ms-auto shrink-0">{stats.done}/{stats.total} ✓</span>}
-        </div>
+          <span className="min-w-0 flex-1 truncate" dir="ltr">{dbPath ? dbPath.split(/[/\\]/).slice(-2).join('/') : '…'}</span>
+          {stats && <span className="tabular shrink-0">{stats.done}/{stats.total} ✓</span>}
+        </button>
       </div>
     </aside>
   );

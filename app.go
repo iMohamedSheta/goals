@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"goals/internal/drive"
 	"goals/internal/store"
 	"goals/internal/tray"
 
-	"github.com/gen2brain/beeep"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/gen2brain/beeep"
 )
 
 // App struct — bound to Wails frontend + shares store with MCP server.
@@ -41,6 +43,8 @@ func (a *App) startup(ctx context.Context) {
 		panic(fmt.Sprintf("failed to open database: %v", err))
 	}
 	a.store = s
+	// safety net: timestamped local backup on every launch (keep last 7)
+	go a.autoLocalBackup()
 	// resume ticking if a timer was left running (e.g. app restarted)
 	if _, err := s.GetActiveTimer(); err == nil {
 		a.ensureTick()
@@ -65,6 +69,36 @@ func (a *App) QuitApp() {
 		}
 	}
 	runtime.Quit(a.ctx)
+}
+
+// ExePath returns the goals.exe path next to the running binary,
+// for copy-paste MCP configs.
+func (a *App) ExePath() string {
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), "goals.exe")
+	}
+	return "goals.exe"
+}
+
+// autoLocalBackup snapshots the DB into the data dir's backups folder on
+// launch and prunes to the newest 7. Best-effort: never fails startup.
+func (a *App) autoLocalBackup() {
+	defer func() { _ = recover() }()
+	if a.store == nil {
+		return
+	}
+	dir := filepath.Join(store.DataDir(), "backups")
+	_ = os.MkdirAll(dir, 0755)
+	name := fmt.Sprintf("goals-%s.db", time.Now().Format("2006-01-02-150405"))
+	_ = a.store.VacuumInto(filepath.Join(dir, name))
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) <= 7 {
+		return
+	}
+	// ReadDir sorts by filename; timestamped names sort chronologically.
+	for _, e := range entries[:len(entries)-7] {
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }
 
 // ---------- Wails-bound API (also mirrored as MCP tools) ----------
@@ -199,6 +233,126 @@ func (a *App) ReportError(message string) error {
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "%s %s\n", time.Now().UTC().Format(time.RFC3339), message)
 	return err
+}
+
+// ---------- Data folder, import, Google Drive ----------
+
+func (a *App) GetDataDir() string {
+	return store.DataDir()
+}
+
+// OpenDataFolder reveals the folder holding goals.db in Explorer.
+func (a *App) OpenDataFolder() (string, error) {
+	dir := store.DataDir()
+	_ = os.MkdirAll(dir, 0755)
+	if err := exec.Command("explorer", dir).Start(); err != nil {
+		return dir, err
+	}
+	return dir, nil
+}
+
+// swapDatabase atomically replaces the live database file. The store is
+// closed first (flushing WAL), then reopened on the new file.
+func (a *App) swapDatabase(data []byte) error {
+	if !drive.ValidSQLite(data) {
+		return fmt.Errorf("file is not a valid Goals database")
+	}
+	a.stopTick()
+	path := a.store.Path()
+	if err := a.store.CheckpointRunning(); err != nil {
+		return err
+	}
+	if err := a.store.Close(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	for _, ext := range []string{"-wal", "-shm", "-journal"} {
+		_ = os.Remove(path + ext)
+	}
+	s, err := store.Open(path)
+	if err != nil {
+		return err
+	}
+	a.store = s
+	if _, err := s.GetActiveTimer(); err == nil {
+		a.ensureTick()
+	}
+	return nil
+}
+
+// ImportDatabaseFile replaces the current DB with a local .db file.
+func (a *App) ImportDatabaseFile(srcPath string) error {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return a.swapDatabase(data)
+}
+
+// PickDatabaseFile opens a file picker for a .db file. Empty string = cancelled.
+func (a *App) PickDatabaseFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Import Goals database",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "SQLite Database (*.db)", Pattern: "*.db"},
+			{DisplayName: "All files (*.*)", Pattern: "*.*"},
+		},
+	})
+}
+
+func (a *App) GetDriveStatus() (drive.Status, error) {
+	return drive.GetStatus(a.store)
+}
+
+func (a *App) SaveDriveCredentials(clientID string, clientSecret string) error {
+	return drive.SaveCredentials(a.store, clientID, clientSecret)
+}
+
+func (a *App) StartDriveAuth() (drive.DeviceAuth, error) {
+	return drive.StartDeviceAuth(a.store)
+}
+
+func (a *App) PollDriveAuth() (drive.DevicePoll, error) {
+	return drive.PollDeviceAuth(a.store)
+}
+
+func (a *App) CancelDriveAuth() {
+	drive.CancelAuthFlow()
+}
+
+func (a *App) DisconnectDrive() error {
+	return drive.Disconnect(a.store)
+}
+
+func (a *App) BackupNow() (drive.BackupFile, error) {
+	return drive.BackupNow(a.store)
+}
+
+func (a *App) ListDriveBackups() ([]drive.BackupFile, error) {
+	out, err := drive.ListBackups(a.store)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []drive.BackupFile{}
+	}
+	return out, nil
+}
+
+func (a *App) DeleteDriveBackup(id string) error {
+	return drive.DeleteBackup(a.store, id)
+}
+
+// RestoreDriveBackup downloads a backup and swaps it in as the live DB.
+// The frontend should reload afterwards (WindowReload).
+func (a *App) RestoreDriveBackup(id string) error {
+	data, err := drive.DownloadBackup(a.store, id)
+	if err != nil {
+		return err
+	}
+	return a.swapDatabase(data)
 }
 
 // ensureTick runs a 1s loop while a timer is active: updates the window

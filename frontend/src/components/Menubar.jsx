@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Plus, Star, X, Minus, Square, LayoutGrid, List as ListIcon, CalendarDays, CalendarRange,
-  Rocket, Settings2, Users, Languages, Power, Check, PictureInPicture2, Palette,
+  Rocket, Settings2, Users, Languages, Power, Check, PictureInPicture2, Palette, Database,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { horizonName } from '../lib/i18n';
@@ -115,6 +115,7 @@ export function Menubar({
         { icon: Settings2, label: t.timelines, onClick: run(() => onSettings('planning')) },
         { icon: Users, label: t.contexts, onClick: run(() => onSettings('contexts')) },
         { icon: Palette, label: t.appearance, onClick: run(() => onSettings('appearance')) },
+        { icon: Database, label: t.tabData, onClick: run(() => onSettings('data')) },
         { type: 'sep' },
         { icon: Languages, label: `${t.language}: ${t.langName}`, onClick: run(onLangToggle) },
         { type: 'sep' },

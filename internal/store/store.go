@@ -100,6 +100,62 @@ type Store struct {
 	path string
 }
 
+// DataDir is the proper per-user home for the database:
+//
+//	Windows: %APPDATA%\Goals   (e.g. C:\Users\you\AppData\Roaming\Goals)
+//	macOS:   ~/Library/Application Support/Goals
+//	Linux:   ~/.config/Goals
+func DataDir() string {
+	if cfg, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(cfg, "Goals")
+	}
+	return "."
+}
+
+// LegacyDBPath is where versions before the data-dir move kept goals.db.
+func LegacyDBPath() string {
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		if low := strings.ToLower(exe); !strings.Contains(low, "temp") && !strings.Contains(low, "tmp") && !strings.Contains(low, "go-build") {
+			return filepath.Join(dir, "goals.db")
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return filepath.Join(cwd, "goals.db")
+	}
+	return "goals.db"
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+// MigrateLegacyDB copies a database left next to the exe by older versions
+// into the new data dir (once). It never deletes the original.
+func MigrateLegacyDB(newPath string) (migratedFrom string, err error) {
+	if fileExists(newPath) {
+		return "", nil
+	}
+	if old := LegacyDBPath(); old != newPath && fileExists(old) {
+		if mkErr := os.MkdirAll(filepath.Dir(newPath), 0755); mkErr != nil {
+			return "", mkErr
+		}
+		data, rErr := os.ReadFile(old)
+		if rErr != nil {
+			return "", rErr
+		}
+		if wErr := os.WriteFile(newPath, data, 0644); wErr != nil {
+			return "", wErr
+		}
+		for _, ext := range []string{"-wal", "-shm", "-journal"} {
+			_ = os.Remove(newPath + ext)
+		}
+		return old, nil
+	}
+	return "", nil
+}
+
 func ResolveDBPath(explicit string) string {
 	if explicit != "" {
 		return explicit
@@ -107,24 +163,17 @@ func ResolveDBPath(explicit string) string {
 	if v := os.Getenv("GOALS_DB_PATH"); v != "" {
 		return v
 	}
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exe)
-		// If running via `go run` / wails dev, exe is in temp; prefer cwd then.
-		if strings.Contains(strings.ToLower(exe), "temp") || strings.Contains(strings.ToLower(exe), "tmp") || strings.Contains(strings.ToLower(exe), "go-build") {
-			if cwd, err := os.Getwd(); err == nil {
-				return filepath.Join(cwd, "goals.db")
-			}
-		}
-		return filepath.Join(dir, "goals.db")
-	}
-	if cfg, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(cfg, "goals", "goals.db")
-	}
-	return "goals.db"
+	return filepath.Join(DataDir(), "goals.db")
 }
 
 func Open(path string) (*Store, error) {
+	// Only auto-migrate into the standard data dir — never clobber an
+	// explicitly chosen database.
+	if path == filepath.Join(DataDir(), "goals.db") {
+		if _, err := MigrateLegacyDB(path); err != nil {
+			return nil, fmt.Errorf("migrate legacy db: %w", err)
+		}
+	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		_ = os.MkdirAll(dir, 0755)
 	}
@@ -146,6 +195,22 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Path() string { return s.path }
+
+// VacuumInto writes a clean, self-contained snapshot of the database to dest.
+// Safe while open. Overwrites dest.
+func (s *Store) VacuumInto(dest string) error {
+	if dir := filepath.Dir(dest); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	_ = os.Remove(dest)
+	safe := strings.ReplaceAll(dest, "'", "''")
+	if _, err := s.db.Exec(`VACUUM INTO '` + safe + `'`); err != nil {
+		return err
+	}
+	return nil
+}
 
 func nowStr() string { return time.Now().UTC().Format(time.RFC3339) }
 
@@ -1065,5 +1130,10 @@ func (s *Store) SetSetting(key, value string) error {
 	}
 	_, err := s.db.Exec(`INSERT INTO settings(key,value) VALUES(?,?)
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+func (s *Store) DeleteSetting(key string) error {
+	_, err := s.db.Exec(`DELETE FROM settings WHERE key=?`, key)
 	return err
 }

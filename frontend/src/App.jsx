@@ -6,7 +6,7 @@ import { Badge } from './components/ui/badge';
 import { Input } from './components/ui/form';
 import { Sidebar } from './components/Sidebar';
 import { Menubar, WindowControls } from './components/Menubar';
-import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, MiniTimer } from './components/Board';
+import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, MiniTimer, TimerWidget } from './components/Board';
 import { TaskSheet, ConfirmModal } from './components/Dialogs';
 import { SettingsSheet } from './components/SettingsSheet';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
@@ -19,9 +19,11 @@ import {
   ListHorizons, UpdateHorizon, CreateHorizon, DeleteHorizon,
   CreateTask, UpdateTask, MoveTask, ToggleFocus, DeleteTask, GetDBPath,
   StartTimer, StopTimer, FinishTask, GetActiveTimer, ListTimeEntries, QuitApp,
-  GetSettings, SetSetting,
+  GetSettings, SetSetting, OpenDataFolder, PickDatabaseFile, ExePath,
+  GetDriveStatus, SaveDriveCredentials, StartDriveAuth, PollDriveAuth, CancelDriveAuth, DisconnectDrive,
+  BackupNow, ListDriveBackups, DeleteDriveBackup, RestoreDriveBackup, ImportDatabaseFile,
 } from '../wailsjs/go/main/App';
-import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowReload } from '../wailsjs/runtime/runtime';
+import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload } from '../wailsjs/runtime/runtime';
 
 export default function App() {
   const [lang, setLang] = React.useState(() => localStorage.getItem('goals-lang') || 'ar');
@@ -33,6 +35,7 @@ export default function App() {
   const [stats, setStats] = React.useState(null);
   const [counts, setCounts] = React.useState({});
   const [dbPath, setDbPath] = React.useState('');
+  const [exePath, setExePath] = React.useState('');
   const [ready, setReady] = React.useState(false);
   const [error, setError] = React.useState(null);
 
@@ -49,9 +52,10 @@ export default function App() {
   const openSettings = (tab) => setSettings({ open: true, tab: tab || 'appearance' });
   const [confirm, setConfirm] = React.useState({ open: false, task: null });
   const [finishConfirm, setFinishConfirm] = React.useState({ open: false, task: null, secs: 0 });
+  const [restoreConfirm, setRestoreConfirm] = React.useState({ open: false, id: null, name: '' });
 
-  const [active, setActive] = React.useState(null); // {id,title,elapsed,timerStartedAt}
-  const [mini, setMini] = React.useState(false);
+  const [active, setActive] = React.useState(null); // {id,title,elapsed,timerStartedAt,maxSeconds}
+  const [miniMode, setMiniMode] = React.useState(null); // null | 'widget' | 'side'
 
   const [appearance, setAppearance] = React.useState(() => loadLocalAppearance());
   const appearanceRef = React.useRef(appearance);
@@ -137,6 +141,9 @@ export default function App() {
         setHorizons(hs || []);
         setContexts(cs || []);
         setDbPath(db || '');
+        try {
+          setExePath(await ExePath());
+        } catch { /* noop */ }
         if ((hs || []).length) {
           setActiveHorizon((cur) => ((hs || []).some((h) => h.key === cur) ? cur : hs[0].key));
         }
@@ -205,7 +212,7 @@ export default function App() {
 
   React.useEffect(() => {
     const onKey = (e) => {
-      if (mini) return;
+      if (miniMode) return;
       const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
       if (e.key === '/' && !typing) { e.preventDefault(); searchRef.current?.focus(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -215,7 +222,7 @@ export default function App() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [mini]);
+  }, [miniMode]);
 
   // ---------- timer actions ----------
 
@@ -235,21 +242,51 @@ export default function App() {
   const doFinish = async () => {
     await FinishTask(finishConfirm.task.id);
     setFinishConfirm({ open: false, task: null, secs: 0 });
-    if (mini) exitMini();
+    if (miniMode) exitMini();
     await refresh();
+  };
+
+  const MINI_SIZES = {
+    widget: { w: 216, h: 54, minW: 200, minH: 48 },
+    side: { w: 320, h: 470, minW: 300, minH: 420 },
+  };
+
+  // dock the mini window to the screen's end edge, vertically centered
+  const applyMiniWindow = async (mode) => {
+    const s = MINI_SIZES[mode];
+    if (!s) return;
+    try {
+      WindowSetAlwaysOnTop(true);
+      WindowSetMinSize(s.minW, s.minH);
+      WindowSetSize(s.w, s.h);
+      const screens = await ScreenGetAll().catch(() => []);
+      const scr = (screens || []).find((x) => x.isPrimary) || (screens || [])[0];
+      const W = scr?.size?.width || scr?.width;
+      const H = scr?.size?.height || scr?.height;
+      if (W && H) {
+        const rtl = document.documentElement.dir === 'rtl';
+        const x = rtl ? 12 : Math.max(0, W - s.w - 12);
+        const y = Math.max(0, Math.round((H - s.h) / 2));
+        WindowSetPosition(x, y);
+      }
+    } catch { /* noop */ }
   };
 
   const enterMini = () => {
     if (!active) return;
-    setMini(true);
-    try {
-      WindowSetAlwaysOnTop(true);
-      WindowSetMinSize(300, 180);
-      WindowSetSize(400, 260);
-    } catch { /* noop */ }
+    setMiniMode('widget');
+    applyMiniWindow('widget');
+  };
+  const expandWidget = () => {
+    setMiniMode('side');
+    applyMiniWindow('side');
+  };
+  const collapseWidget = () => {
+    setMiniMode('widget');
+    applyMiniWindow('widget');
   };
   const exitMini = () => {
-    setMini(false);
+    setMiniMode(null);
     try {
       WindowSetAlwaysOnTop(false);
       WindowSetSize(1280, 800);
@@ -325,20 +362,51 @@ export default function App() {
     }
   };
 
+  const importLocalDb = async () => {
+    try {
+      const path = await PickDatabaseFile();
+      if (!path) return { ok: true };
+      await ImportDatabaseFile(path);
+      WindowReload();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  };
+
+  const doRestore = async () => {
+    try {
+      await RestoreDriveBackup(restoreConfirm.id);
+      WindowReload();
+    } catch (err) {
+      setRestoreConfirm({ open: false, id: null, name: '' });
+      alert(String(err));
+    }
+  };
+
   // ---------- mini mode ----------
 
-  if (mini) {
+  if (miniMode) {
     return (
       <div className="flex h-full flex-col overflow-hidden bg-background">
         <div className="min-h-0 flex-1">
-          <MiniTimer
-            t={t}
-            active={active}
-            onPause={() => active && pauseTimer(active.id)}
-            onResume={() => active && startTimer(active)}
-            onFinish={(a) => askFinish(a.id ? { id: a.id, title: a.title, elapsedSeconds: a.elapsed, timerStartedAt: a.timerStartedAt } : a)}
-            onExpand={exitMini}
-          />
+          {miniMode === 'widget' ? (
+            <TimerWidget
+              t={t}
+              active={active}
+              onExpand={expandWidget}
+            />
+          ) : (
+            <MiniTimer
+              t={t}
+              active={active}
+              onPause={() => active && pauseTimer(active.id)}
+              onResume={() => active && startTimer(active)}
+              onFinish={(a) => askFinish(a.id ? { id: a.id, title: a.title, elapsedSeconds: a.elapsed, timerStartedAt: a.timerStartedAt } : a)}
+              onExpand={exitMini}
+              onCollapse={collapseWidget}
+            />
+          )}
         </div>
         <ConfirmModal
           t={t}
@@ -429,6 +497,7 @@ export default function App() {
         timerRunning={!!active}
         onQuit={quitApp}
         onSettings={() => openSettings('appearance')}
+        onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -581,6 +650,31 @@ export default function App() {
           if (contextFilter === d.id) setContextFilter('all');
           await refresh();
         }}
+        dbPath={dbPath}
+        onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}
+        exePath={exePath}
+        drive={{
+          getStatus: GetDriveStatus,
+          saveCreds: SaveDriveCredentials,
+          startAuth: StartDriveAuth,
+          pollAuth: PollDriveAuth,
+          cancelAuth: CancelDriveAuth,
+          disconnect: DisconnectDrive,
+          backup: BackupNow,
+          list: ListDriveBackups,
+          del: DeleteDriveBackup,
+        }}
+        onImportLocal={importLocalDb}
+        onAskRestore={(id, name) => setRestoreConfirm({ open: true, id, name })}
+      />
+      <ConfirmModal
+        t={t}
+        open={restoreConfirm.open}
+        onClose={() => setRestoreConfirm({ open: false, id: null, name: '' })}
+        title={t.restoreTitle}
+        message={t.restoreMsg(restoreConfirm.name || '')}
+        confirmLabel={t.restore}
+        onConfirm={doRestore}
       />
       <ConfirmModal
         t={t}
