@@ -302,22 +302,9 @@
   html[data-shadows='off'] .shadow-inner {
     box-shadow: none !important;
   }
-  /* compact density */
-  html[data-density='compact'] .tcard {
-    padding: 0.625rem;
-  }
-  html[data-density='compact'] .colbody {
-    gap: 0.375rem;
-    padding: 0.375rem;
-  }
-  /* spacious density */
-  html[data-density='spacious'] .tcard {
-    padding: 1.125rem;
-  }
-  html[data-density='spacious'] .colbody {
-    gap: 0.75rem;
-    padding: 0.75rem;
-  }
+  /* density paddings are owned by the appearance.js helpers
+     (density().card / .colBody / .cell / .chip / .badge) so every surface
+     — kanban, table, filters, badges — stays in sync. */
   /* glass sidebar */
   html[data-glass='on'] aside {
     background: hsl(var(--card) / 0.55) !important;

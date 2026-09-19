@@ -13,7 +13,7 @@ import { SettingsSheet } from './components/SettingsSheet';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
 import {
   DEFAULT_APPEARANCE, loadLocalAppearance, saveLocalAppearance, applyAppearance,
-  fromSettingsMap, settingsDiff,
+  fromSettingsMap, settingsDiff, filterChipClass, density, animClass,
 } from './lib/appearance';
 import {
   ListTasks, GetStats, ListContexts, CreateContext, UpdateContext, DeleteContext,
@@ -532,10 +532,10 @@ export default function App() {
               <div className="flex items-center gap-2.5">
                 <h2 className="truncate text-xl font-bold tracking-tight">{horizonName(horizon, lang) || 'Goals'}</h2>
                 {horizon && (
-                  <Badge variant="secondary" className="tabular shrink-0">~{horizon.defaultDays}</Badge>
+                  <Badge variant="secondary" className={cn('tabular shrink-0', density(appearance).badge)}>~{horizon.defaultDays}</Badge>
                 )}
                 {focusOnly && (
-                  <Badge variant="warning"><Star size={12} fill="currentColor" /> {t.focusedOnly}</Badge>
+                  <Badge variant="warning" className={density(appearance).badge}><Star size={12} fill="currentColor" /> {t.focusedOnly}</Badge>
                 )}
               </div>
               <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{horizonDesc(horizon, lang)}</p>
@@ -544,6 +544,7 @@ export default function App() {
               <ActiveTimerPill
                 t={t}
                 active={active}
+                ap={appearance}
                 onPause={() => pauseTimer(active.id)}
                 onResume={() => startTimer(active)}
                 onMini={enterMini}
@@ -565,7 +566,7 @@ export default function App() {
                 </button>
               )}
             </div>
-            <ViewToggle t={t} view={view} onChange={setView} />
+            <ViewToggle t={t} view={view} onChange={setView} ap={appearance} />
             <Button onClick={() => openTaskSheet(null, 'todo')}>
               <Plus /> {t.newTask}
             </Button>
@@ -577,12 +578,7 @@ export default function App() {
               <button
                 key={s.key}
                 onClick={() => setStatusFilter(s.key)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                  statusFilter === s.key
-                    ? 'border-primary/50 bg-primary/15 text-primary'
-                    : 'border-border bg-transparent text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground'
-                )}
+                className={cn(filterChipClass(appearance, statusFilter === s.key))}
               >
                 {t[s.key]}
               </button>
@@ -591,7 +587,7 @@ export default function App() {
               {t.shownDone(boardTasks.length, boardTasks.filter((x) => x.status === 'done').length)}
             </span>
             {hasFilters && (
-              <button onClick={clearFilters} className="flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <button onClick={clearFilters} className={cn('flex items-center gap-1 rounded-full font-medium text-muted-foreground hover:text-foreground', density(appearance).chip, animClass(appearance))}>
                 <X size={12} /> {t.clear}
               </button>
             )}
@@ -603,6 +599,7 @@ export default function App() {
             <KanbanBoard
               t={t}
               tasks={boardTasks}
+              ap={appearance}
               contextOf={contextOf}
               onEdit={(x) => openTaskSheet(x, x.status)}
               onDelete={(x) => setConfirm({ open: true, task: x })}
@@ -618,6 +615,7 @@ export default function App() {
               <TaskTable
                 t={t}
                 tasks={boardTasks}
+                ap={appearance}
                 contextOf={contextOf}
                 onEdit={(x) => openTaskSheet(x, x.status)}
                 onDelete={(x) => setConfirm({ open: true, task: x })}

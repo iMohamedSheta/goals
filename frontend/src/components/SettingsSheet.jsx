@@ -8,7 +8,7 @@ import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Sheet, SheetHeader, SheetBody, SheetFooter } from './ui/sheet';
 import { Input, Label } from './ui/form';
-import { ACCENTS, FONTS } from '../lib/appearance';
+import { ACCENTS, FONTS, surfClass, density, motionClass, RADIUS } from '../lib/appearance';
 import { horizonName } from '../lib/i18n';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
 
@@ -78,7 +78,7 @@ function AppearanceTab({ t, value, dirty, onChange, onReset }) {
             </button>
           )}
         </div>
-        <div className="surf tcard rounded-xl border bg-card p-3">
+        <div className={cn('tcard', RADIUS, surfClass(value), density(value).card, motionClass(value))}>
           <div className="h-2 w-12 rounded-full bg-primary/25" />
           <div className="mt-2 h-2.5 w-full rounded bg-foreground/10" />
           <div className="mt-1.5 h-2.5 w-2/3 rounded bg-foreground/5" />

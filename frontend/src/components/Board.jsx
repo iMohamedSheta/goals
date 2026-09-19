@@ -8,6 +8,10 @@ import { cn } from '../lib/utils';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { formatHMS, liveElapsed } from '../lib/i18n';
+import {
+  DEFAULT_APPEARANCE, density, surfClass,
+  motionClass, animClass, hoverShadowClass, RADIUS, RADIUS_SM,
+} from '../lib/appearance';
 import { WindowHide, WindowMinimise } from '../../wailsjs/runtime/runtime';
 
 /** Compact normal-style caption buttons for the mini window. */
@@ -66,10 +70,10 @@ export function dueInfo(task, t) {
   return { label: task.dueDate, cls: neutral };
 }
 
-export function ContextBadge({ name, color }) {
+export function ContextBadge({ name, color, ap }) {
   if (!name) return <span className="text-xs text-muted-foreground">—</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+    <span className={cn('inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary font-medium text-secondary-foreground', density(ap).badge, animClass(ap))}>
       <span className="size-1.5 rounded-full" style={{ background: color }} />
       <span className="max-w-[110px] truncate">{name}</span>
     </span>
@@ -89,13 +93,15 @@ function IconBtn({ title, onClick, className, children }) {
 }
 
 /** Timer row rendered under every card + table row actions. */
-export function TimerControls({ t, task, onStart, onPause, onFinish }) {
+export function TimerControls({ t, task, onStart, onPause, onFinish, ap }) {
   const running = !!task.timerStartedAt;
   const hasTime = running || (task.elapsedSeconds || 0) > 0;
   return (
     <div
       className={cn(
-        'flex items-center gap-1.5 rounded-lg border px-2 py-1.5',
+        'flex items-center gap-1.5 border px-2 py-1.5',
+        RADIUS_SM,
+        animClass(ap),
         running ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-border/70 bg-muted/30'
       )}
       onClick={(e) => e.stopPropagation()}
@@ -123,9 +129,10 @@ export function TimerControls({ t, task, onStart, onPause, onFinish }) {
   );
 }
 
-const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish }) {
+const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish, ap = DEFAULT_APPEARANCE }) {
   const [dragging, setDragging] = React.useState(false);
   const due = dueInfo(task, t);
+  const d = density(ap);
   return (
     <div
       draggable
@@ -137,7 +144,13 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
       onDragEnd={() => setDragging(false)}
       onClick={() => onEdit(task)}
       className={cn(
-        'tcard surf group relative h-auto min-h-[190px] w-full cursor-pointer rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-px hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5',
+        'tcard group relative h-auto min-h-[190px] w-full cursor-pointer',
+        RADIUS,
+        surfClass(ap),
+        d.card,
+        motionClass(ap),
+        hoverShadowClass(ap),
+        'hover:border-primary/40',
         'shrink-0 grow-0 basis-auto', // natural height — never squish, column scrolls instead
         task.focus && 'border-amber-500/40',
         task.timerStartedAt && 'border-emerald-500/40',
@@ -147,16 +160,16 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
       <div className="flex min-w-0 flex-col">
         <div className="flex items-center gap-1.5">
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <ContextBadge name={context?.name || task.contextName} color={context?.color || task.contextColor || '#6366f1'} />
+            <ContextBadge ap={ap} name={context?.name || task.contextName} color={context?.color || task.contextColor || '#6366f1'} />
             {task.focus && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">
+              <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 font-semibold text-amber-400', d.badge, animClass(ap))}>
                 <Star size={10} fill="currentColor" /> {t.focusBadge}
               </span>
             )}
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFocus(task); }}
-            className={cn('shrink-0 rounded p-1 transition-colors', task.focus ? 'text-amber-400' : 'text-muted-foreground opacity-0 hover:text-amber-400 group-hover:opacity-100')}
+            className={cn('shrink-0 rounded p-1', animClass(ap), task.focus ? 'text-amber-400' : 'text-muted-foreground opacity-0 hover:text-amber-400 group-hover:opacity-100')}
             title="Focus"
           >
             <Star size={15} fill={task.focus ? 'currentColor' : 'none'} />
@@ -167,21 +180,21 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
         {task.description && <p className="cdesc mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className={cn('inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', PRIORITY_LABEL)}>
+          <span className={cn('inline-flex items-center border font-bold uppercase tracking-wide', RADIUS_SM, d.badge, animClass(ap), PRIORITY_LABEL)}>
             {t[task.priority] || task.priority}
           </span>
           {due && (
-            <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium tabular', due.cls)}>
+            <span className={cn('inline-flex items-center gap-1 font-medium tabular', RADIUS_SM, 'border', d.badge, animClass(ap), due.cls)}>
               <CalendarClock size={11} /> {due.label}
             </span>
           )}
         </div>
 
         <div className="mt-2.5">
-          <TimerControls t={t} task={task} onStart={onStart} onPause={onPause} onFinish={onFinish} />
+          <TimerControls t={t} task={task} onStart={onStart} onPause={onPause} onFinish={onFinish} ap={ap} />
         </div>
 
-        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className={cn('mt-1 flex items-center gap-1 opacity-0 group-hover:opacity-100', animClass(ap))}>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(task); }}
             className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -200,12 +213,13 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
   );
 });
 
-const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish, onDrop }) {
+const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish, onDrop, ap = DEFAULT_APPEARANCE }) {
   const [over, setOver] = React.useState(false);
   const meta = STATUSES.find((s) => s.key === status) || STATUSES[0];
   const Icon = meta.icon;
+  const d = density(ap);
   return (
-    <div className="surf flex h-full max-h-full min-h-0 w-72 shrink-0 grow-0 basis-72 flex-col rounded-xl border bg-card/40">
+    <div className={cn(surfClass(ap), RADIUS, 'flex h-full max-h-full min-h-0 w-72 shrink-0 grow-0 basis-72 flex-col bg-card/40')}>
       <div className="flex shrink-0 items-center gap-2 px-3.5 pb-2.5 pt-3.5">
         <Icon size={15} className="text-muted-foreground" />
         <span className="text-[13px] font-semibold">{t[status]}</span>
@@ -222,10 +236,10 @@ const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit,
           const id = e.dataTransfer.getData('text/task-id');
           if (id) onDrop(id, status);
         }}
-        className={cn('colbody thin-scroll mx-2 mb-2 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overflow-x-hidden rounded-lg p-2 transition-colors', over && 'drop-target')}
+        className={cn('colbody thin-scroll mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden', RADIUS_SM, d.colBody, animClass(ap), over && 'drop-target')}
       >
         {tasks.map((task) => (
-          <TaskCard key={task.id} t={t} task={task} context={contextOf(task.contextId)} onEdit={onEdit} onDelete={onDelete} onToggleFocus={onToggleFocus} onStart={onStart} onPause={onPause} onFinish={onFinish} />
+          <TaskCard key={task.id} t={t} task={task} context={contextOf(task.contextId)} onEdit={onEdit} onDelete={onDelete} onToggleFocus={onToggleFocus} onStart={onStart} onPause={onPause} onFinish={onFinish} ap={ap} />
         ))}
         {tasks.length === 0 && (
           <div className="shrink-0 rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
@@ -238,10 +252,10 @@ const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit,
 });
 
 export function KanbanBoard(props) {
-  const { t, tasks, onCreateFirst } = props;
+  const { t, tasks, onCreateFirst, ap = DEFAULT_APPEARANCE } = props;
   if (tasks.length === 0) {
     return (
-      <div className="flex flex-1 flex-col bg-white! items-center justify-center gap-3 py-20 text-center animate-slide-in">
+      <div className={cn('flex flex-1 flex-col items-center justify-center gap-3 py-20 text-center animate-slide-in', animClass(ap))}>
         <div className="flex size-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
           <Crosshair size={24} className="text-primary" />
         </div>
@@ -262,11 +276,12 @@ export function KanbanBoard(props) {
   );
 }
 
-export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish }) {
+export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish, ap = DEFAULT_APPEARANCE }) {
+  const d = density(ap);
   if (tasks.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 py-20 text-center">
-        <div className="flex size-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
+        <div className={cn(surfClass(ap), RADIUS, 'flex size-14 items-center justify-center border bg-card')}>
           <SearchX size={24} className="text-muted-foreground" />
         </div>
         <h3 className="text-base font-semibold">{t.nothingHere}</h3>
@@ -275,8 +290,8 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
     );
   }
   return (
-    <div className="surf overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="grid grid-cols-[28px_minmax(0,1fr)_110px_80px_120px_110px_90px_60px] items-center gap-2 border-b bg-muted/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className={cn(surfClass(ap), RADIUS, 'overflow-hidden')}>
+      <div className={cn('grid grid-cols-[28px_minmax(0,1fr)_110px_80px_120px_110px_90px_60px] items-center gap-2 border-b bg-muted/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground', d.cell)}>
         <span />
         <span>{t.task}</span><span>{t.context}</span><span>{t.priority}</span><span>{t.totalTime}</span><span>{t.due}</span><span>{t.status}</span><span />
       </div>
@@ -290,11 +305,11 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
           <div
             key={task.id}
             onClick={() => onEdit(task)}
-            className="grid cursor-pointer grid-cols-[28px_minmax(0,1fr)_110px_80px_120px_110px_90px_60px] items-center gap-2 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent/50"
+            className={cn('grid cursor-pointer grid-cols-[28px_minmax(0,1fr)_110px_80px_120px_110px_90px_60px] items-center gap-2 border-b last:border-0 hover:bg-accent/50', d.cell, animClass(ap))}
           >
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFocus(task); }}
-              className={task.focus ? 'text-amber-400' : 'text-muted-foreground hover:text-amber-400'}
+              className={cn(task.focus ? 'text-amber-400' : 'text-muted-foreground hover:text-amber-400', animClass(ap))}
             >
               <Star size={15} fill={task.focus ? 'currentColor' : 'none'} />
             </button>
@@ -302,11 +317,11 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
               <span className={cn('block truncate text-[13.5px] font-semibold', task.status === 'done' && 'text-muted-foreground line-through')}>
                 {task.title}
               </span>
-              {task.description && <span className="block truncate text-xs text-muted-foreground">{task.description}</span>}
+              {task.description && <span className="cdesc block truncate text-xs text-muted-foreground">{task.description}</span>}
             </span>
-            <span className="min-w-0"><ContextBadge name={ctx?.name || task.contextName} color={ctx?.color || task.contextColor || '#6366f1'} /></span>
+            <span className="min-w-0"><ContextBadge ap={ap} name={ctx?.name || task.contextName} color={ctx?.color || task.contextColor || '#6366f1'} /></span>
             <span>
-              <span className={cn('inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', PRIORITY_LABEL)}>
+              <span className={cn('inline-flex items-center border font-bold uppercase tracking-wide', RADIUS_SM, d.badge, PRIORITY_LABEL)}>
                 {t[task.priority] || task.priority}
               </span>
             </span>
@@ -314,23 +329,23 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
               {running && <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-emerald-400 text-emerald-400" />}
               <LiveTime task={task} className={cn('text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')} showBadge badgeLabel={t.overtime} />
               {!running ? (
-                <button title={t.startTimer} onClick={() => onStart(task)} className="rounded p-1 text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300"><Play size={13} /></button>
+                <button title={t.startTimer} onClick={() => onStart(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300', animClass(ap))}><Play size={13} /></button>
               ) : (
-                <button title={t.pauseTimer} onClick={() => onPause(task)} className="rounded p-1 text-emerald-300 hover:bg-emerald-500/20"><Pause size={13} /></button>
+                <button title={t.pauseTimer} onClick={() => onPause(task)} className={cn('rounded p-1 text-emerald-300 hover:bg-emerald-500/20', animClass(ap))}><Pause size={13} /></button>
               )}
-              <button title={t.finishTask} onClick={() => onFinish(task)} className="rounded p-1 text-muted-foreground hover:bg-primary/15 hover:text-primary"><Check size={13} /></button>
+              <button title={t.finishTask} onClick={() => onFinish(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-primary/15 hover:text-primary', animClass(ap))}><Check size={13} /></button>
             </span>
             <span className="text-xs tabular">
-              {due ? <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5', due.cls)}><CalendarClock size={11} />{due.label}</span> : <span className="text-muted-foreground">—</span>}
+              {due ? <span className={cn('inline-flex items-center gap-1 border', RADIUS_SM, d.badge, animClass(ap), due.cls)}><CalendarClock size={11} />{due.label}</span> : <span className="text-muted-foreground">—</span>}
             </span>
             <span>
-              <Badge variant="secondary">
+              <Badge variant="secondary" className={d.badge}>
                 <SIcon size={12} /> {t[task.status]}
               </Badge>
             </span>
             <span className="flex justify-end gap-0.5">
-              <button onClick={(e) => { e.stopPropagation(); onEdit(task); }} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil size={14} /></button>
-              <button onClick={(e) => { e.stopPropagation(); onDelete(task); }} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-red-400"><Trash2 size={14} /></button>
+              <button onClick={(e) => { e.stopPropagation(); onEdit(task); }} className={cn('rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground', animClass(ap))}><Pencil size={14} /></button>
+              <button onClick={(e) => { e.stopPropagation(); onDelete(task); }} className={cn('rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-red-400', animClass(ap))}><Trash2 size={14} /></button>
             </span>
           </div>
         );
@@ -339,9 +354,9 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
   );
 }
 
-export function ViewToggle({ t, view, onChange }) {
+export function ViewToggle({ t, view, onChange, ap }) {
   return (
-    <div className="flex rounded-lg border bg-secondary/60 p-0.5">
+    <div className={cn('flex border bg-secondary/60 p-0.5', RADIUS_SM, animClass(ap))}>
       {[
         { key: 'kanban', label: t.board, icon: LayoutGrid },
         { key: 'list', label: t.list, icon: ListIcon },
@@ -350,7 +365,9 @@ export function ViewToggle({ t, view, onChange }) {
           key={v.key}
           onClick={() => onChange(v.key)}
           className={cn(
-            'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all',
+            'flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium',
+            RADIUS_SM,
+            animClass(ap),
             view === v.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -362,11 +379,11 @@ export function ViewToggle({ t, view, onChange }) {
 }
 
 /** Header pill shown while a timer runs: live time + pause + mini + finish. */
-export function ActiveTimerPill({ t, active, onPause, onResume, onMini, onFinish }) {
+export function ActiveTimerPill({ t, active, onPause, onResume, onMini, onFinish, ap }) {
   if (!active) return null;
   const running = !!active.timerStartedAt;
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 py-1 pe-1 ps-3 animate-slide-in">
+    <div className={cn('flex items-center gap-2 border border-emerald-500/40 bg-emerald-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))}>
       <span className={running ? 'pulse-dot size-2 rounded-full bg-emerald-400 text-emerald-400' : 'size-2 rounded-full bg-amber-400'} />
       <span className="max-w-[180px] truncate text-[13px] font-semibold text-emerald-200">{active.title}</span>
       <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-[13px] font-bold tabular text-emerald-300" showBadge badgeLabel={t.overtime} />
