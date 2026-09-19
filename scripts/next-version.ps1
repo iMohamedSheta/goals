@@ -5,6 +5,10 @@
 #   "BREAKING CHANGE" / "type!:"    -> major
 #   anything else                   -> patch
 #
+# No release at all when nothing changed in the shipped app since the last
+# tag (docs-only, CI/workflow, or script-only pushes are skipped — they
+# batch up into the next app release instead).
+#
 # Writes skip/next/bump/changelog to $env:GITHUB_OUTPUT (GitHub Actions),
 # or prints them when run locally.
 #
@@ -34,6 +38,20 @@ if ($headMsg -match '\[skip release\]') {
     $out.skip = 'true'
     Write-Host "No new commits since $latest - nothing to release."
   } else {
+    # Files changed since the last release (first release: everything tracked).
+    # Only these paths affect the shipped exe — anything else (docs, CI,
+    # release scripts) batches up silently into the next app release.
+    if ([string]::IsNullOrEmpty($latest)) { $files = @(git ls-files) }
+    else { $files = @(git diff --name-only $latest HEAD) }
+    $appChanged = @($files | Where-Object {
+      (($_ -match '\.go$') -and ($_ -notmatch '^scripts/')) `
+        -or ($_ -match '^frontend/') -or ($_ -match '^wails\.json$') `
+        -or ($_ -match '^(go\.mod|go\.sum)$') -or ($_ -match '^build/')
+    })
+    if (-not $appChanged) {
+      $out.skip = 'true'
+      Write-Host "No app changes since $(if ($latest) { $latest } else { 'the beginning' }) - docs/meta only, skipping release."
+    } else {
     $subjects = @(git log $range --format=%s)
     $bodies = git log $range --format=%b | Out-String
 
@@ -70,6 +88,7 @@ if ($headMsg -match '\[skip release\]') {
       $out.bump = $bump
       $out.changelog = ($cl -join "`n")
       Write-Host "Releasing $next ($bump)"
+    }
     }
   }
 }

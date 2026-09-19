@@ -367,6 +367,8 @@ The version bump follows [Conventional Commits](https://www.conventionalcommits.
 | anything else (`docs:`, `chore:`, …) | patch |
 
 Add `[skip release]` to the HEAD commit message to skip publishing.
+Pushes that don't touch the shipped app (docs, `docs/`, `.github/`, `scripts/`)
+are skipped automatically — they batch up into the next app release instead.
 Pull requests and pushes run `CI` instead: `go build`, `go test`, `go vet`,
 `staticcheck` (bug detection) plus `staticcheck -checks "all"` (style lint),
 and the frontend `vite build`.

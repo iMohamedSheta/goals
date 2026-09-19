@@ -1,6 +1,9 @@
 name: Release
 
-# Every push to main publishes a new version:
+# Every push to main publishes a new version — but only if the shipped app
+# changed (Go code outside scripts/, frontend/, wails.json, go.mod/go.sum,
+# build/). Docs-only, CI/workflow, or script-only pushes are skipped and
+# batch up into the next app release instead.
 #   feat: / feat(scope):            -> minor bump (x.Y.0)
 #   fix:  / fix(scope):             -> patch bump (x.y.Z)
 #   "BREAKING CHANGE" or "type!:"   -> major bump (X.0.0)
