@@ -15,10 +15,12 @@ dist/
 *.exe
 
 # --- Frontend generated ---
+# NOTE: frontend/wailsjs/ (Wails Go bindings) is intentionally COMMITTED:
+# plain `npm run build` (and CI) needs those files, and they only change
+# when the Go bindings change. `wails build` regenerates them anyway.
 frontend/dist/*
 !frontend/dist/gitkeep
 frontend/node_modules/
-frontend/wailsjs/
 node_modules/
 
 # --- Go ---

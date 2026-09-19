@@ -24,6 +24,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Fresh checkouts have no frontend/dist (gitignored build output), but
+      # main.go embeds it — so seed a placeholder before build/vet/test.
+      # (Real builds via `wails build` replace it with the compiled frontend.)
+      - name: Prepare embed dir
+        run: mkdir -p frontend/dist && touch frontend/dist/gitkeep
+
       - name: Build
         run: go build ./...
 
