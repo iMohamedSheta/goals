@@ -20,6 +20,12 @@ can read and manage your goals from any project. GUI and AI share one `goals.db`
 3. Double-click `goals.exe` to run — your data is stored in `%APPDATA%\Goals\goals.db`
 4. If Windows SmartScreen warns (the exe is unsigned): **More info → Run anyway**
 
+New versions install themselves: the sidebar footer shows the running version
+(`v…`, or `vdev` for local builds); when a newer release exists a green
+**Update available** badge appears — open **Settings → Data** to check,
+download, and restart into the update. The app also checks silently at most
+once a day. (`goals.exe --version` prints the embedded version.)
+
 ## Contents
 
 - [Download](#download)
@@ -356,6 +362,10 @@ self-hosted woff2). Arabic/English with full RTL mirroring.
 Every push to `main` publishes a new GitHub Release automatically
 (`.github/workflows/release.yml`): the exe is built with Wails, screenshotted
 while running with demo data, and uploaded as `goals.exe` + `screenshot.png`.
+The release tag is baked into the exe
+(`-ldflags "-X goals/internal/update.Version=…"`, surfaced via
+`GetVersion()` / `--version`) so the in-app updater in Settings → Data can
+detect, download, and install newer releases.
 
 The version bump follows [Conventional Commits](https://www.conventionalcommits.org/):
 

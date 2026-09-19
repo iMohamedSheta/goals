@@ -217,6 +217,22 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  /* thin overlay-friendly scrollbars for scrollable card regions */
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.45) transparent;
+  }
+  .thin-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.45);
+    border-radius: 9999px;
+  }
+  .thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
   /* Sheet slides in from the inline-end side (right in LTR, left in RTL) */
   .sheet-panel {
     animation: sheet-ltr 0.28s cubic-bezier(0.16, 1, 0.3, 1);

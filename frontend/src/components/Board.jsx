@@ -162,8 +162,8 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
           </button>
         </div>
 
-        <h4 className="mt-2 text-[13.5px] font-semibold leading-snug">{task.title}</h4>
-        {task.description && <p className="cdesc line-clamp-2 mt-1 text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
+        <h4 className="mt-2 break-words text-[13.5px] font-semibold leading-snug">{task.title}</h4>
+        {task.description && <p className="cdesc thin-scroll mt-1 max-h-24 overflow-y-auto break-words pe-1 text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className={cn('inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', PRIORITY_LABEL)}>

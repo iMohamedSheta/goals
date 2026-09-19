@@ -311,3 +311,46 @@ export namespace store {
 
 }
 
+export namespace update {
+	
+	export class Download {
+	    latest: string;
+	    path: string;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Download(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.latest = source["latest"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	    }
+	}
+	export class Status {
+	    current: string;
+	    latest: string;
+	    available: boolean;
+	    pageUrl: string;
+	    notes: string;
+	    publishedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.available = source["available"];
+	        this.pageUrl = source["pageUrl"];
+	        this.notes = source["notes"];
+	        this.publishedAt = source["publishedAt"];
+	    }
+	}
+
+}
+

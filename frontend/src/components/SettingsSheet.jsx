@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Moon, Sun, Monitor, Palette, Type, Square, Layers, Box,
   Sparkles, Maximize2, RotateCcw, Plus, Trash2, CalendarRange, Users,
-  Database, Cloud, Copy, Check, FolderOpen, Upload, Download, Bot,
+  Database, Cloud, Copy, Check, FolderOpen, Upload, Download, Bot, Power,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -348,6 +348,103 @@ function ContextsTab({ t, contexts, onCreate, onUpdate, onDelete }) {
 
 /* ---------------- data tab ---------------- */
 
+function UpdateSection({ t, version, latestTag, updater, onUpdateFound }) {
+  const [phase, setPhase] = React.useState(latestTag ? 'available' : 'idle'); // idle|checking|uptodate|available|downloading|downloaded
+  const [info, setInfo] = React.useState(latestTag ? { latest: latestTag } : null);
+  const [err, setErr] = React.useState('');
+
+  const check = async () => {
+    setPhase('checking');
+    setErr('');
+    try {
+      const st = await updater.check(true);
+      setInfo(st || null);
+      if (st?.available) {
+        setPhase('available');
+        onUpdateFound?.(st.latest || '');
+      } else {
+        setPhase('uptodate');
+      }
+    } catch {
+      setPhase('idle');
+      setErr(t.checkFailed);
+    }
+  };
+
+  const download = async () => {
+    setPhase('downloading');
+    setErr('');
+    try {
+      await updater.download();
+      setPhase('downloaded');
+    } catch (e) {
+      setPhase('available');
+      setErr(t.updateFailed + String((e && (e.message || e)) || e));
+    }
+  };
+
+  const install = async () => {
+    setErr('');
+    try {
+      await updater.install();
+      // success quits the app — the updater script takes over from here
+    } catch (e) {
+      setErr(t.updateFailed + String((e && (e.message || e)) || e));
+    }
+  };
+
+  return (
+    <Section icon={Download} title={t.appUpdates}>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
+        <span className="text-muted-foreground">{t.appVersion}:</span>
+        <span dir="ltr" className="tabular font-bold">v{version || 'dev'}</span>
+        {phase === 'uptodate' && <span className="text-emerald-400">{t.upToDate}</span>}
+        {phase === 'available' && info?.latest && (
+          <span className="font-bold text-amber-300">{t.updateAvailable(info.latest)}</span>
+        )}
+      </div>
+      {phase === 'downloaded' && (
+        <p className="mb-2 text-[13px] text-emerald-400">{t.updateReady}</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {(phase === 'idle' || phase === 'uptodate') && (
+          <Button variant="secondary" size="sm" onClick={check}>
+            <Download /> {t.checkUpdates}
+          </Button>
+        )}
+        {phase === 'checking' && (
+          <Button variant="secondary" size="sm" disabled>
+            <RotateCcw className="animate-spin" /> {t.checkingUpdates}
+          </Button>
+        )}
+        {phase === 'available' && (
+          <>
+            <Button size="sm" onClick={download}>
+              <Download /> {t.downloadInstall}
+            </Button>
+            {info?.pageUrl && (
+              <Button variant="secondary" size="sm" onClick={() => { try { BrowserOpenURL(info.pageUrl); } catch { /* noop */ } }}>
+                {t.viewRelease}
+              </Button>
+            )}
+          </>
+        )}
+        {phase === 'downloading' && (
+          <Button size="sm" disabled>
+            <RotateCcw className="animate-spin" /> {t.downloading}
+          </Button>
+        )}
+        {phase === 'downloaded' && (
+          <Button size="sm" onClick={install}>
+            <Power /> {t.restartToInstall}
+          </Button>
+        )}
+      </div>
+      {err && <p className="mt-2 text-xs text-red-400" dir="ltr">{err}</p>}
+    </Section>
+  );
+}
+
 function fmtSize(n) {
   n = n || 0;
   if (n < 1024) return `${n} B`;
@@ -364,7 +461,7 @@ function fmtDate(s) {
   }
 }
 
-function DataTab({ t, dbPath, onOpenFolder, drive, onImportLocal, onAskRestore }) {
+function DataTab({ t, dbPath, onOpenFolder, drive, onImportLocal, onAskRestore, updater, version, latestTag, onUpdateFound }) {
   const [status, setStatus] = React.useState({ hasClient: false, connected: false });
   const [creds, setCreds] = React.useState({ id: '', secret: '' });
   const [backups, setBackups] = React.useState([]);
@@ -455,6 +552,7 @@ function DataTab({ t, dbPath, onOpenFolder, drive, onImportLocal, onAskRestore }
 
   return (
     <div className="space-y-3">
+      <UpdateSection t={t} version={version} latestTag={latestTag} updater={updater} onUpdateFound={onUpdateFound} />
       {err && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-[13px] text-red-300" dir="ltr">{err}</div>
       )}
@@ -727,6 +825,8 @@ export function SettingsSheet(props) {
           <DataTab
             t={t} dbPath={props.dbPath} onOpenFolder={props.onOpenFolder} drive={props.drive}
             onImportLocal={props.onImportLocal} onAskRestore={props.onAskRestore}
+            updater={props.updater} version={props.version} latestTag={props.latestTag}
+            onUpdateFound={props.onUpdateFound}
           />
         )}
         {tab === 'mcp' && <McpTab t={t} exePath={props.exePath} />}

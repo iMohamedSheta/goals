@@ -30,6 +30,10 @@ export function CancelDriveAuth() {
   return window['go']['main']['App']['CancelDriveAuth']();
 }
 
+export function CheckForUpdates(arg1) {
+  return window['go']['main']['App']['CheckForUpdates'](arg1);
+}
+
 export function CreateContext(arg1, arg2) {
   return window['go']['main']['App']['CreateContext'](arg1, arg2);
 }
@@ -60,6 +64,10 @@ export function DeleteTask(arg1) {
 
 export function DisconnectDrive() {
   return window['go']['main']['App']['DisconnectDrive']();
+}
+
+export function DownloadUpdate() {
+  return window['go']['main']['App']['DownloadUpdate']();
 }
 
 export function ExePath() {
@@ -102,8 +110,16 @@ export function GetTask(arg1) {
   return window['go']['main']['App']['GetTask'](arg1);
 }
 
+export function GetVersion() {
+  return window['go']['main']['App']['GetVersion']();
+}
+
 export function ImportDatabaseFile(arg1) {
   return window['go']['main']['App']['ImportDatabaseFile'](arg1);
+}
+
+export function InstallUpdateAndRestart() {
+  return window['go']['main']['App']['InstallUpdateAndRestart']();
 }
 
 export function ListContexts() {

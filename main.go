@@ -9,6 +9,7 @@ import (
 	"goals/internal/mcp"
 	"goals/internal/store"
 	"goals/internal/tray"
+	"goals/internal/update"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -21,6 +22,12 @@ import (
 var assets embed.FS
 
 func main() {
+	// `goals.exe --version` prints the embedded build version
+	// ("dev" for local builds, the release tag for CI builds).
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+		fmt.Println(update.Version)
+		return
+	}
 	// MCP stdio mode: `goals.exe mcp [--db path]` — same single binary.
 	// NOTE: handled before wails.Run so MCP never touches the GUI single-instance lock.
 	if len(os.Args) > 1 && (os.Args[1] == "mcp" || os.Args[1] == "--mcp") {

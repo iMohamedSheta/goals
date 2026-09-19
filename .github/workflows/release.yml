@@ -67,7 +67,7 @@ jobs:
 
       - name: Build Windows exe
         if: steps.version.outputs.skip != 'true'
-        run: wails build -platform windows/amd64 -o goals.exe
+        run: wails build -platform windows/amd64 -o goals.exe -ldflags "-X goals/internal/update.Version=${{ steps.version.outputs.next }}"
 
       - name: Seed demo database for screenshot
         if: steps.version.outputs.skip != 'true'

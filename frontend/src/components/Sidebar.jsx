@@ -17,6 +17,7 @@ export function Sidebar({
   activeHorizon, onHorizon, focusOnly, onFocusToggle,
   contextFilter, onContextFilter, dbPath, onOpenFolder,
   timerRunning, onQuit, onSettings,
+  version, updateAvailable, onOpenUpdates,
 }) {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e bg-card/50">
@@ -163,6 +164,19 @@ export function Sidebar({
           <Database size={12} className="shrink-0" />
           <span className="min-w-0 flex-1 truncate" dir="ltr">{dbPath ? dbPath.split(/[/\\]/).slice(-2).join('/') : '…'}</span>
           {stats && <span className="tabular shrink-0">{stats.done}/{stats.total} ✓</span>}
+        </button>
+        <button
+          onClick={() => onOpenUpdates?.()}
+          title={t.openUpdates}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <span dir="ltr" className="tabular shrink-0">v{version || 'dev'}</span>
+          {updateAvailable && (
+            <span className="flex min-w-0 items-center gap-1.5 font-bold text-emerald-400">
+              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
+              <span className="truncate">{t.updateAvailableShort}</span>
+            </span>
+          )}
         </button>
       </div>
     </aside>

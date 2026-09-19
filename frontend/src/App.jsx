@@ -23,6 +23,7 @@ import {
   GetSettings, SetSetting, OpenDataFolder, PickDatabaseFile, ExePath,
   GetDriveStatus, SaveDriveCredentials, StartDriveAuth, PollDriveAuth, CancelDriveAuth, DisconnectDrive,
   BackupNow, ListDriveBackups, DeleteDriveBackup, RestoreDriveBackup, ImportDatabaseFile,
+  GetVersion, CheckForUpdates, DownloadUpdate, InstallUpdateAndRestart,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload } from '../wailsjs/runtime/runtime';
 
@@ -37,6 +38,8 @@ export default function App() {
   const [counts, setCounts] = React.useState({});
   const [dbPath, setDbPath] = React.useState('');
   const [exePath, setExePath] = React.useState('');
+  const [version, setVersion] = React.useState('');
+  const [latestTag, setLatestTag] = React.useState('');
   const [ready, setReady] = React.useState(false);
   const [error, setError] = React.useState(null);
 
@@ -145,6 +148,19 @@ export default function App() {
         setDbPath(db || '');
         try {
           setExePath(await ExePath());
+        } catch { /* noop */ }
+        try {
+          setVersion(await GetVersion());
+        } catch { /* noop */ }
+        // silent update check, at most once a day — never blocks boot
+        try {
+          const last = +(localStorage.getItem('goals-last-update-check') || 0);
+          if (Date.now() - last > 24 * 3600 * 1000) {
+            CheckForUpdates(false).then((st) => {
+              try { localStorage.setItem('goals-last-update-check', String(Date.now())); } catch { /* noop */ }
+              if (!cancelled && st?.available) setLatestTag(st.latest || '');
+            }).catch(() => { /* offline — stay silent */ });
+          }
         } catch { /* noop */ }
         if ((hs || []).length) {
           setActiveHorizon((cur) => ((hs || []).some((h) => h.key === cur) ? cur : hs[0].key));
@@ -504,6 +520,9 @@ export default function App() {
         onQuit={quitApp}
         onSettings={() => openSettings('appearance')}
         onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}
+        version={version}
+        updateAvailable={!!latestTag}
+        onOpenUpdates={() => openSettings('data')}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -659,6 +678,14 @@ export default function App() {
         dbPath={dbPath}
         onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}
         exePath={exePath}
+        version={version}
+        latestTag={latestTag}
+        onUpdateFound={(tag) => setLatestTag(tag || '')}
+        updater={{
+          check: (force) => CheckForUpdates(force),
+          download: () => DownloadUpdate(),
+          install: () => InstallUpdateAndRestart(),
+        }}
         drive={{
           getStatus: GetDriveStatus,
           saveCreds: SaveDriveCredentials,

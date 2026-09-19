@@ -12,6 +12,7 @@ import (
 	"goals/internal/drive"
 	"goals/internal/store"
 	"goals/internal/tray"
+	"goals/internal/update"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/gen2brain/beeep"
@@ -78,6 +79,45 @@ func (a *App) ExePath() string {
 		return filepath.Join(filepath.Dir(exe), "goals.exe")
 	}
 	return "goals.exe"
+}
+
+// ---------- Version & self-update ----------
+
+// GetVersion returns the embedded build version ("dev" for local builds;
+// CI bakes the release tag in via ldflags).
+func (a *App) GetVersion() string {
+	return update.Version
+}
+
+// CheckForUpdates asks the public GitHub releases for a newer goals.exe.
+// force=true bypasses the 5-minute cache.
+func (a *App) CheckForUpdates(force bool) (update.Status, error) {
+	return update.Check(update.Version, force)
+}
+
+// DownloadUpdate fetches the newest goals.exe next to the running one as
+// goals.pending.exe. Nothing is replaced yet.
+func (a *App) DownloadUpdate() (update.Download, error) {
+	return update.DownloadPending(update.Version)
+}
+
+// InstallUpdateAndRestart swaps in the previously downloaded update and
+// restarts the app. The swap runs in a detached updater script after this
+// process exits (Windows locks the running exe).
+func (a *App) InstallUpdateAndRestart() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	pending := filepath.Join(filepath.Dir(exe), update.PendingName)
+	if _, err := os.Stat(pending); err != nil {
+		return fmt.Errorf("no downloaded update found - download it first")
+	}
+	if err := update.StageInstall(pending, os.Getpid()); err != nil {
+		return err
+	}
+	a.QuitApp()
+	return nil
 }
 
 // autoLocalBackup snapshots the DB into the data dir's backups folder on
