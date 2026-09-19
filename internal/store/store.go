@@ -1,3 +1,4 @@
+// Package store is the SQLite persistence layer for tasks, contexts, horizons and settings.
 package store
 
 import (

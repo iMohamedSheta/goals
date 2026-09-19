@@ -1,9 +1,14 @@
 # Goals — single-file desktop planner (Wails + SQLite + MCP)
 
+[![CI](https://github.com/iMohamedSheta/goals/actions/workflows/ci.yml/badge.svg)](https://github.com/iMohamedSheta/goals/actions/workflows/ci.yml)
+[![Release](https://github.com/iMohamedSheta/goals/actions/workflows/release.yml/badge.svg)](https://github.com/iMohamedSheta/goals/releases/latest)
+
 One `goals.exe`, no installer, no DLLs, no server. Offline-first.
 SQLite is pure-Go (`modernc.org/sqlite`) and the frontend is embedded — the exe is the whole app.
 Frameless window: no OS chrome or menu — the in-app top menu (مهام/عرض/إدارة) is the
 title bar with drag + normal min/max/close buttons (close hides to tray).
+
+![Goals app screenshot](docs/screenshot.png)
 
 The same exe is also an **MCP server**, so AI assistants (opencode, Claude, Cursor, …)
 can read and manage your goals from any project. GUI and AI share one `goals.db`.
@@ -26,6 +31,7 @@ can read and manage your goals from any project. GUI and AI share one `goals.db`
 - [Background timer + mini window](#background-timer--mini-window)
 - [Data, troubleshooting](#data-troubleshooting)
 - [Build from source](#build-from-source)
+- [Releasing](#releasing)
 - [Project layout](#project-layout)
 
 ## Run
@@ -293,6 +299,28 @@ wails build -platform windows/amd64 -o goals.exe
 
 Frontend lives in `frontend/` (React + Vite + Tailwind, shadcn-style tokens, Cairo/Tajawal
 self-hosted woff2). Arabic/English with full RTL mirroring.
+
+## Releasing
+
+Every push to `main` publishes a new GitHub Release automatically
+(`.github/workflows/release.yml`): the exe is built with Wails, screenshotted
+while running with demo data, and uploaded as `goals.exe` + `screenshot.png`.
+
+The version bump follows [Conventional Commits](https://www.conventionalcommits.org/):
+
+| Commit message | Bump |
+|---|---|
+| `feat: ...` / `feat(scope): ...` | minor (`x.Y.0`) |
+| `fix: ...` / `fix(scope): ...` | patch (`x.y.Z`) |
+| `...!:` / `BREAKING CHANGE` in body | major (`X.0.0`) |
+| anything else (`docs:`, `chore:`, …) | patch |
+
+Add `[skip release]` to the HEAD commit message to skip publishing.
+Pull requests and pushes run `CI` instead: `go build`, `go test`, `go vet`,
+`staticcheck` (bug detection) plus `staticcheck -checks "all"` (style lint),
+and the frontend `vite build`.
+(`golangci-lint` releases are not built for Go 1.26 yet, so CI uses the
+source-built honnef.co tools instead — same coverage, no version gate.)
 
 ## Project layout
 

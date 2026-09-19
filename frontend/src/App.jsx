@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, Plus, Star, X, SlidersHorizontal, RotateCcw } from 'lucide-react';
+import { Search, Plus, Star, X, SlidersHorizontal, RotateCcw, Bot } from 'lucide-react';
 import { cn } from './lib/utils';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { Menubar, WindowControls } from './components/Menubar';
 import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, MiniTimer, TimerWidget } from './components/Board';
 import { TaskSheet, ConfirmModal } from './components/Dialogs';
+import { ChatDrawer } from './components/ChatDrawer';
 import { SettingsSheet } from './components/SettingsSheet';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
 import {
@@ -56,6 +57,7 @@ export default function App() {
 
   const [active, setActive] = React.useState(null); // {id,title,elapsed,timerStartedAt,maxSeconds}
   const [miniMode, setMiniMode] = React.useState(null); // null | 'widget' | 'side'
+  const [chatOpen, setChatOpen] = React.useState(false);
 
   const [appearance, setAppearance] = React.useState(() => loadLocalAppearance());
   const appearanceRef = React.useRef(appearance);
@@ -218,6 +220,10 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSheet({ open: true, task: null, presetStatus: 'todo' });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setChatOpen((v) => !v);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -695,6 +701,21 @@ export default function App() {
         danger={false}
         onConfirm={doFinish}
       />
+      <ChatDrawer
+        t={t}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        onTasksChanged={refresh}
+      />
+      {!chatOpen && (
+        <button
+          onClick={() => setChatOpen(true)}
+          title={`${t.aiChat} (Ctrl+J)`}
+          className="fixed bottom-5 end-5 z-40 grid size-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform hover:scale-105 active:scale-95"
+        >
+          <Bot size={22} />
+        </button>
+      )}
     </div>
   );
 }

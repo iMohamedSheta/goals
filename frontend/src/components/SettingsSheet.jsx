@@ -597,16 +597,26 @@ const MCP_TOOLS = [
 ];
 
 function aiPromptText(exe) {
-  const cmd = (exe || '').replace(/\\/g, '\\\\');
+  const path = exe || '';
+  const entry = JSON.stringify(
+    { goals: { type: 'local', command: [path, 'mcp'], enabled: true } },
+    null,
+    2
+  );
+
   return `Add my Goals desktop app as a global MCP server so you can manage my tasks from ANY project.
+
+Executable path (may contain spaces; keep it as ONE string, exactly as written):
+"${path}"
 
 Steps:
 1. Open your GLOBAL MCP config (opencode: ~/.config/opencode/opencode.jsonc — create it if missing).
 2. Merge this server into the top-level "mcp" object (keep every existing entry, delete nothing):
-{"goals": {"type": "local", "command": ["${cmd}", "mcp"], "enabled": true}}
+${entry}
 3. Restart the session (MCP servers connect at session start), then call the "stats" tool and summarize my tasks to confirm it works.
 
 Rules:
+- The command array is [executable, "mcp"]. Do NOT split the executable path on spaces and do NOT add shell quoting inside the array.
 - Never override GOALS_DB_PATH: the GUI and MCP must share the default database.
 - Horizons are planning tabs (short/medium/long or a custom key) — always pass a valid one when creating tasks.
 - Confirm with me before delete_task or delete_horizon.`;

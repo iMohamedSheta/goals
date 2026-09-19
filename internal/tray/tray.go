@@ -1,3 +1,4 @@
+// Package tray manages the Windows system-tray icon and its menu.
 package tray
 
 import (

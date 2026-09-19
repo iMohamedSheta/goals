@@ -11,6 +11,7 @@ goals.db-*
 
 # --- Build output (the .exe is produced by `wails build`, not committed) ---
 build/bin/
+dist/
 *.exe
 
 # --- Frontend generated ---

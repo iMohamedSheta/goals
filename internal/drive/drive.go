@@ -45,10 +45,9 @@ const (
 )
 
 var (
-	flowMu       sync.Mutex
-	pendingCode  string
-	pendingFlow  *xsocial.GoogleDeviceFlow
-	pendingSince time.Time
+	flowMu      sync.Mutex
+	pendingCode string
+	pendingFlow *xsocial.GoogleDeviceFlow
 )
 
 func newDeviceFlow(id, secret string) *xsocial.GoogleDeviceFlow {
@@ -214,7 +213,6 @@ func StartDeviceAuth(s *store.Store) (DeviceAuth, error) {
 	}
 	pendingFlow = flow
 	pendingCode = resp.DeviceCode
-	pendingSince = time.Now()
 	interval := resp.Interval
 	if interval <= 0 {
 		interval = 5

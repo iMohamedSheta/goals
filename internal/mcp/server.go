@@ -1,3 +1,4 @@
+// Package mcp exposes the Goals database as an MCP server over stdio.
 package mcp
 
 import (
