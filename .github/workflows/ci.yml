@@ -41,6 +41,7 @@ jobs:
 
       - name: Staticcheck (deep static analysis + style lint)
         run: |
+          set -e
           go install honnef.co/go/tools/cmd/staticcheck@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 

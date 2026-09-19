@@ -84,3 +84,9 @@ if ($env:GITHUB_OUTPUT) {
 } else {
   $out
 }
+
+# The tag-existence check above (`git rev-parse --verify --quiet`) exits 1
+# when the tag does NOT exist — the normal, expected case. GitHub's pwsh
+# wrapper ends every step with `exit $LastExitCode`, so a stale 1 here would
+# fail the step even though the script succeeded. Reset unconditionally.
+$global:LastExitCode = 0
