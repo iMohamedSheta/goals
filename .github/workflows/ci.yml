@@ -13,7 +13,14 @@ concurrency:
 jobs:
   backend:
     name: Go tests / static analysis / lint
-    runs-on: ubuntu-latest
+    # Windows: this ships as a Windows-only exe (systray, WebView2, .ico,
+    # windows-tagged files). Linux runners would compile the wrong tagged
+    # files AND need GTK/WebKit system headers just to link systray —
+    # Windows CI compiles and tests exactly what ships, with zero apt setup.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
