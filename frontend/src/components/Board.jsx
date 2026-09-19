@@ -137,13 +137,14 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
       onDragEnd={() => setDragging(false)}
       onClick={() => onEdit(task)}
       className={cn(
-        'tcard surf group relative cursor-pointer overflow-hidden rounded-xl border bg-card p-3.5 shadow-sm transition-all hover:-translate-y-px hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5',
+        'tcard surf group relative h-auto min-h-[190px] w-full cursor-pointer rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-px hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5',
+        'shrink-0 grow-0 basis-auto', // natural height — never squish, column scrolls instead
         task.focus && 'border-amber-500/40',
         task.timerStartedAt && 'border-emerald-500/40',
         dragging && 'dragging-card'
       )}
     >
-      <div>
+      <div className="flex min-w-0 flex-col">
         <div className="flex items-center gap-1.5">
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <ContextBadge name={context?.name || task.contextName} color={context?.color || task.contextColor || '#6366f1'} />
@@ -162,8 +163,8 @@ const TaskCard = React.memo(function TaskCard({ t, task, context, onEdit, onDele
           </button>
         </div>
 
-        <h4 className="mt-2 break-words text-[13.5px] font-semibold leading-snug">{task.title}</h4>
-        {task.description && <p className="cdesc thin-scroll mt-1 max-h-24 overflow-y-auto break-words pe-1 text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
+        <h4 className="mt-2.5 break-words text-sm font-semibold leading-relaxed">{task.title}</h4>
+        {task.description && <p className="cdesc mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className={cn('inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', PRIORITY_LABEL)}>
@@ -204,8 +205,8 @@ const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit,
   const meta = STATUSES.find((s) => s.key === status) || STATUSES[0];
   const Icon = meta.icon;
   return (
-    <div className="surf flex min-h-0 w-72 shrink-0 flex-col rounded-xl border bg-card/40">
-      <div className="flex items-center gap-2 px-3.5 pb-2.5 pt-3.5">
+    <div className="surf flex h-full max-h-full min-h-0 w-72 shrink-0 grow-0 basis-72 flex-col rounded-xl border bg-card/40">
+      <div className="flex shrink-0 items-center gap-2 px-3.5 pb-2.5 pt-3.5">
         <Icon size={15} className="text-muted-foreground" />
         <span className="text-[13px] font-semibold">{t[status]}</span>
         <span className="tabular ms-auto rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
@@ -221,13 +222,13 @@ const Column = React.memo(function Column({ t, status, tasks, contextOf, onEdit,
           const id = e.dataTransfer.getData('text/task-id');
           if (id) onDrop(id, status);
         }}
-        className={cn('colbody mx-2 mb-2 flex flex-1 flex-col gap-2 overflow-y-auto rounded-lg p-1.5 transition-colors', over && 'drop-target')}
+        className={cn('colbody thin-scroll mx-2 mb-2 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overflow-x-hidden rounded-lg p-2 transition-colors', over && 'drop-target')}
       >
         {tasks.map((task) => (
           <TaskCard key={task.id} t={t} task={task} context={contextOf(task.contextId)} onEdit={onEdit} onDelete={onDelete} onToggleFocus={onToggleFocus} onStart={onStart} onPause={onPause} onFinish={onFinish} />
         ))}
         {tasks.length === 0 && (
-          <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+          <div className="shrink-0 rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
             {t.dropHere}
           </div>
         )}
@@ -240,7 +241,7 @@ export function KanbanBoard(props) {
   const { t, tasks, onCreateFirst } = props;
   if (tasks.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-20 text-center animate-slide-in">
+      <div className="flex flex-1 flex-col bg-white! items-center justify-center gap-3 py-20 text-center animate-slide-in">
         <div className="flex size-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
           <Crosshair size={24} className="text-primary" />
         </div>
@@ -253,7 +254,7 @@ export function KanbanBoard(props) {
     );
   }
   return (
-    <div className="flex flex-1 items-stretch gap-3 overflow-x-auto pb-2">
+    <div className="flex h-full min-h-0 flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden pb-2">
       {STATUSES.map((s) => (
         <Column key={s.key} {...props} status={s.key} tasks={tasks.filter((x) => x.status === s.key)} />
       ))}
@@ -311,7 +312,7 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
             </span>
             <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
               {running && <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-emerald-400 text-emerald-400" />}
-      <LiveTime task={task} className={cn('text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')} showBadge badgeLabel={t.overtime} />
+              <LiveTime task={task} className={cn('text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')} showBadge badgeLabel={t.overtime} />
               {!running ? (
                 <button title={t.startTimer} onClick={() => onStart(task)} className="rounded p-1 text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300"><Play size={13} /></button>
               ) : (
@@ -391,38 +392,38 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
         </span>
       </div>
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-      {!active ? (
-        <>
-          <TimerIcon size={22} className="text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{t.noActiveTimer}</p>
-          <Button size="sm" onClick={onExpand}><Maximize2 /> {t.expandBtn}</Button>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center gap-2">
-            <span className={active.timerStartedAt ? 'pulse-dot size-2.5 rounded-full bg-emerald-400 text-emerald-400' : 'size-2.5 rounded-full bg-amber-400'} />
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {active.timerStartedAt ? t.running : t.paused}
-            </span>
-          </div>
-          <h2 className="line-clamp-2 max-w-full text-[15px] font-bold leading-snug">{active.title}</h2>
-          <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-4xl font-black tabular tracking-tight text-emerald-300" showBadge badgeLabel={t.overtime} />
-          <div className="mt-1 flex items-center gap-2">
-            {active.timerStartedAt ? (
-              <Button size="sm" variant="secondary" onClick={onPause}><Pause /> {t.pauseTimer}</Button>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={onResume}><Play /> {t.resumeTimer}</Button>
+        {!active ? (
+          <>
+            <TimerIcon size={22} className="text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t.noActiveTimer}</p>
+            <Button size="sm" onClick={onExpand}><Maximize2 /> {t.expandBtn}</Button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className={active.timerStartedAt ? 'pulse-dot size-2.5 rounded-full bg-emerald-400 text-emerald-400' : 'size-2.5 rounded-full bg-amber-400'} />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {active.timerStartedAt ? t.running : t.paused}
+              </span>
+            </div>
+            <h2 className="line-clamp-2 max-w-full text-[15px] font-bold leading-snug">{active.title}</h2>
+            <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-4xl font-black tabular tracking-tight text-emerald-300" showBadge badgeLabel={t.overtime} />
+            <div className="mt-1 flex items-center gap-2">
+              {active.timerStartedAt ? (
+                <Button size="sm" variant="secondary" onClick={onPause}><Pause /> {t.pauseTimer}</Button>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={onResume}><Play /> {t.resumeTimer}</Button>
+              )}
+              <Button size="sm" onClick={() => onFinish(active)} className="bg-emerald-600 hover:bg-emerald-500"><Check /> {t.finishTask}</Button>
+              <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
+            </div>
+            {onCollapse && (
+              <button onClick={onCollapse} title={t.collapse} className="mt-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+                <Minimize2 size={12} /> {t.collapse}
+              </button>
             )}
-            <Button size="sm" onClick={() => onFinish(active)} className="bg-emerald-600 hover:bg-emerald-500"><Check /> {t.finishTask}</Button>
-          <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
-          </div>
-          {onCollapse && (
-            <button onClick={onCollapse} title={t.collapse} className="mt-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
-              <Minimize2 size={12} /> {t.collapse}
-            </button>
-          )}
-        </>
-      )}
+          </>
+        )}
       </div>
     </div>
   );
