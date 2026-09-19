@@ -13,8 +13,16 @@ title bar with drag + normal min/max/close buttons (close hides to tray).
 The same exe is also an **MCP server**, so AI assistants (opencode, Claude, Cursor, …)
 can read and manage your goals from any project. GUI and AI share one `goals.db`.
 
+## Download
+
+1. Open the [**latest release**](https://github.com/iMohamedSheta/goals/releases/latest)
+2. Under **Assets**, download **`goals.exe`** (single file, no installer, no DLLs)
+3. Double-click `goals.exe` to run — your data is stored in `%APPDATA%\Goals\goals.db`
+4. If Windows SmartScreen warns (the exe is unsigned): **More info → Run anyway**
+
 ## Contents
 
+- [Download](#download)
 - [Run](#run)
 - [Features](#features)
 - [MCP — talk to your tasks from any AI app](#mcp--talk-to-your-tasks-from-any-ai-app)
@@ -290,7 +298,50 @@ No Google involved? Every launch also drops a timestamped snapshot into
 
 ## Build from source
 
-Requirements: Go 1.23+, Node 18+, Wails v2 (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
+### 1. Clone
+
+```sh
+git clone https://github.com/iMohamedSheta/goals.git
+cd goals
+```
+
+### 2. Requirements
+
+- **Go 1.26+** (see `go.mod`)
+- **Node 20+**
+- **Wails v2 CLI** (pinned to match `go.mod`):
+
+```sh
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+```
+
+### 3. Start the dev environment
+
+```sh
+wails dev
+```
+
+This opens the app window with frontend hot-reload — edit anything under
+`frontend/src/` and the UI refreshes instantly. The first run also installs
+frontend dependencies and generates the `frontend/wailsjs/` Go bindings
+(those files are committed, so plain `npm run build` in `frontend/` works too).
+
+> Tip: point the dev run at an isolated database so you never touch your real
+> data: `GOALS_DB_PATH=%TEMP%\goals-dev.db wails dev`
+> (PowerShell: `$env:GOALS_DB_PATH="$env:TEMP\goals-dev.db"; wails dev`).
+
+### 4. Checks before you push
+
+```sh
+go test ./... -count=1
+go vet ./...
+staticcheck ./...              # go install honnef.co/go/tools/cmd/staticcheck@latest
+staticcheck -checks "all" ./...  # style lint
+```
+
+PRs and pushes to `main` run the same gates in CI (`CI` workflow).
+
+### 5. Production build
 
 ```sh
 wails build -platform windows/amd64 -o goals.exe
