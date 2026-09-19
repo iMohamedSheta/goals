@@ -1,0 +1,46 @@
+# --- SQLite databases (local user data, incl. WAL/SHM sidecars) ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+goals.db-*
+
+# --- Build output (the .exe is produced by `wails build`, not committed) ---
+build/bin/
+*.exe
+
+# --- Frontend generated ---
+frontend/dist/*
+!frontend/dist/gitkeep
+frontend/node_modules/
+frontend/wailsjs/
+node_modules/
+
+# --- Go ---
+# (no local toolchain artifacts; module cache lives outside the repo)
+
+# --- Env / secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Logs & temp ---
+*.log
+*.tmp
+tmp/
+temp/
+
+# --- OS junk ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*~
