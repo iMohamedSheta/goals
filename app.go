@@ -49,6 +49,8 @@ func (a *App) startup(ctx context.Context) {
 	// resume ticking if a timer was left running (e.g. app restarted)
 	if _, err := s.GetActiveTimer(); err == nil {
 		a.ensureTick()
+	} else if _, err := s.GetActiveContextTimer(""); err == nil {
+		a.ensureTick()
 	}
 }
 
@@ -62,11 +64,14 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 }
 
-// QuitApp stops any running timer (saving it) and quits for real.
+// QuitApp stops any running timers (saving them) and quits for real.
 func (a *App) QuitApp() {
 	if a.store != nil {
 		if active, err := a.store.GetActiveTimer(); err == nil {
 			_, _ = a.store.StopTimer(active.ID)
+		}
+		if cactive, err := a.store.GetActiveContextTimer(""); err == nil {
+			_, _ = a.store.StopContextTimer(cactive.ID)
 		}
 	}
 	runtime.Quit(a.ctx)
@@ -150,16 +155,20 @@ func (a *App) GetDBPath() string {
 	return store.ResolveDBPath(a.dbPath)
 }
 
-func (a *App) ListContexts() ([]store.Context, error) {
-	return a.store.ListContexts()
+func (a *App) ListContexts(day string) ([]store.Context, error) {
+	return a.store.ListContexts(day)
+}
+
+func (a *App) GetContext(id string, day string) (store.Context, error) {
+	return a.store.GetContext(id, day)
 }
 
 func (a *App) CreateContext(name string, color string) (store.Context, error) {
 	return a.store.CreateContext(name, color)
 }
 
-func (a *App) UpdateContext(id string, name string, color string) (store.Context, error) {
-	return a.store.UpdateContext(id, name, color)
+func (a *App) UpdateContext(id string, name string, color string, dailyTargetSeconds int64, maxSeconds int64, recurrence string, description string, descriptionAr string) (store.Context, error) {
+	return a.store.UpdateContext(id, name, color, dailyTargetSeconds, maxSeconds, recurrence, description, descriptionAr)
 }
 
 func (a *App) DeleteContext(id string) error {
@@ -255,6 +264,42 @@ func (a *App) ListTimeEntries(taskID string) ([]store.TimeEntry, error) {
 	return a.store.ListTimeEntries(taskID)
 }
 
+// ---------- Context goals (parallel timer: may run alongside the task timer) ----------
+
+func (a *App) StartContextTimer(id string) (store.Context, error) {
+	c, err := a.store.StartContextTimer(id)
+	if err != nil {
+		return c, err
+	}
+	a.resetOvertime("ctx:" + id)
+	a.ensureTick()
+	a.emitTick()
+	return c, nil
+}
+
+func (a *App) StopContextTimer(id string) (store.Context, error) {
+	c, err := a.store.StopContextTimer(id)
+	if err != nil {
+		return c, err
+	}
+	a.resetOvertime("ctx:" + id)
+	a.emitTick()
+	return c, nil
+}
+
+func (a *App) GetActiveContextTimer(day string) (store.Context, error) {
+	return a.store.GetActiveContextTimer(day)
+}
+
+func (a *App) ListContextEntries(contextID string) ([]store.ContextTimeEntry, error) {
+	return a.store.ListContextEntries(contextID)
+}
+
+func (a *App) GetContextToday(id string, day string) (int64, error) {
+	total, _, err := a.store.ContextToday(id, day)
+	return total, err
+}
+
 func (a *App) GetSettings() (map[string]string, error) {
 	return a.store.GetSettings()
 }
@@ -317,6 +362,8 @@ func (a *App) swapDatabase(data []byte) error {
 	}
 	a.store = s
 	if _, err := s.GetActiveTimer(); err == nil {
+		a.ensureTick()
+	} else if _, err := s.GetActiveContextTimer(""); err == nil {
 		a.ensureTick()
 	}
 	return nil
@@ -429,35 +476,69 @@ func (a *App) ensureTick() {
 }
 
 // tickOnce returns false when no timer is running (loop should stop).
+// Task and context-goal timers are independent and may both run at once.
 func (a *App) tickOnce(n int) bool {
 	if a.store == nil {
 		return false
 	}
-	active, err := a.store.GetActiveTimer()
-	if err != nil {
+	active, taskErr := a.store.GetActiveTimer()
+	cactive, ctxErr := a.store.GetActiveContextTimer("")
+	if taskErr != nil && ctxErr != nil {
 		runtime.WindowSetTitle(a.ctx, "Goals")
 		tray.SetTooltip("Goals")
 		return false
 	}
-	elapsed, _, _ := a.store.Elapsed(active.ID)
 	if n%30 == 0 {
 		_ = a.store.CheckpointRunning()
 	}
-	title := fmt.Sprintf("\u23F1 %s \u00B7 %s", formatHMS(elapsed), active.Title)
-	overtime := active.MaxSeconds > 0 && elapsed >= active.MaxSeconds
-	if overtime {
+	title := "Goals"
+	over := false
+	if taskErr == nil {
+		elapsed, _, _ := a.store.Elapsed(active.ID)
+		title = fmt.Sprintf("\u23F1 %s \u00B7 %s", formatHMS(elapsed), active.Title)
+		if active.MaxSeconds > 0 && elapsed >= active.MaxSeconds {
+			over = true
+			a.notifyOvertimeOnce(active.ID, active.Title, elapsed, active.MaxSeconds)
+		}
+		runtime.EventsEmit(a.ctx, "timer:tick", map[string]any{
+			"taskId":  active.ID,
+			"title":   active.Title,
+			"elapsed": elapsed,
+		})
+	} else {
+		runtime.EventsEmit(a.ctx, "timer:tick", nil)
+	}
+	if ctxErr == nil {
+		celapsed, _, _ := a.store.ContextElapsed(cactive.ID)
+		part := fmt.Sprintf("\U0001F3AF %s \u00B7 %s", formatHMS(celapsed), cactive.Name)
+		if taskErr == nil {
+			title = title + "  |  " + part
+		} else {
+			title = part
+		}
+		if cactive.MaxSeconds > 0 && celapsed >= cactive.MaxSeconds {
+			over = true
+			a.notifyOvertimeOnce("ctx:"+cactive.ID, cactive.Name, celapsed, cactive.MaxSeconds)
+		}
+		// daily-target toast: fires once when today's total passes the target
+		if cactive.DailyTarget > 0 {
+			if today, _, _ := a.store.ContextToday(cactive.ID, time.Now().UTC().Format("2006-01-02")); today >= cactive.DailyTarget {
+				a.notifyOvertimeOnce("ctxday:"+cactive.ID+":"+time.Now().UTC().Format("2006-01-02"), cactive.Name+" — daily target reached", today, cactive.DailyTarget)
+			}
+		}
+		runtime.EventsEmit(a.ctx, "context:tick", map[string]any{
+			"contextId": cactive.ID,
+			"title":     cactive.Name,
+			"elapsed":   celapsed,
+		})
+	} else {
+		runtime.EventsEmit(a.ctx, "context:tick", nil)
+	}
+	if over {
 		title = "\u26A0 " + title
 	}
 	runtime.WindowSetTitle(a.ctx, title)
 	tray.SetTooltip("Goals — " + title)
-	if overtime {
-		a.notifyOvertimeOnce(active.ID, active.Title, elapsed, active.MaxSeconds)
-	}
-	runtime.EventsEmit(a.ctx, "timer:tick", map[string]any{
-		"taskId":  active.ID,
-		"title":   active.Title,
-		"elapsed": elapsed,
-	})
 	return true
 }
 
@@ -477,8 +558,18 @@ func (a *App) emitTick() {
 		runtime.EventsEmit(a.ctx, "timer:tick", map[string]any{"taskId": active.ID, "title": active.Title, "elapsed": elapsed})
 	} else {
 		runtime.EventsEmit(a.ctx, "timer:tick", nil)
-		runtime.WindowSetTitle(a.ctx, "Goals")
-		tray.SetTooltip("Goals")
+	}
+	if oactive, err := a.store.GetActiveContextTimer(""); err == nil {
+		oelapsed, _, _ := a.store.ContextElapsed(oactive.ID)
+		runtime.EventsEmit(a.ctx, "context:tick", map[string]any{"contextId": oactive.ID, "title": oactive.Name, "elapsed": oelapsed})
+	} else {
+		runtime.EventsEmit(a.ctx, "context:tick", nil)
+	}
+	if _, terr := a.store.GetActiveTimer(); terr != nil {
+		if _, oerr := a.store.GetActiveContextTimer(""); oerr != nil {
+			runtime.WindowSetTitle(a.ctx, "Goals")
+			tray.SetTooltip("Goals")
+		}
 	}
 	_ = running
 }

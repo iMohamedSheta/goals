@@ -39,9 +39,16 @@ func main() {
 	defer s.Close()
 
 	ctxIDs := map[string]string{}
-	if ctxs, err := s.ListContexts(); err == nil {
+	if ctxs, err := s.ListContexts(""); err == nil {
 		for _, c := range ctxs {
 			ctxIDs[c.Name] = c.ID
+		}
+		if id, ok := ctxIDs["Work"]; ok {
+			// demo goal: 5h of focused work a day
+			if _, err := s.UpdateContext(id, "Work", "#3b82f6", 5*3600, 0, "daily", "", ""); err != nil {
+				fmt.Fprintln(os.Stderr, "seed: work goal:", err)
+				os.Exit(1)
+			}
 		}
 	}
 

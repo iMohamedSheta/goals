@@ -76,8 +76,14 @@ func tools() []toolDef {
 		{Name: "move_task", Description: "Move a task to another kanban column.", InputSchema: obj(map[string]any{"id": str("task id"), "status": str("todo|in_progress|done|blocked")}, []string{"id", "status"})},
 		{Name: "toggle_focus", Description: "Toggle a task's focus pin.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "delete_task", Description: "Delete a task.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
-		{Name: "list_contexts", Description: "List contexts (Work, Life, ...).", InputSchema: obj(map[string]any{}, []string{})},
+		{Name: "list_contexts", Description: "List contexts (Work, Life, ...). Each context is a goal: daily target, own timer, today's progress. day=YYYY-MM-DD for daily progress (default today).", InputSchema: obj(map[string]any{"day": str("YYYY-MM-DD (default today)")}, []string{})},
 		{Name: "create_context", Description: "Create a context (e.g. Work, Life).", InputSchema: obj(map[string]any{"name": str("name"), "color": str("hex color")}, []string{"name"})},
+		{Name: "update_context", Description: "Rename/recolor a context and set its goal: recurrence daily|weekly, dailyTargetSeconds=target per period e.g. 18000 for 5h/day, maxSeconds lifetime estimate, description(s).", InputSchema: obj(map[string]any{
+			"id": str("context id"), "name": str("name"), "color": str("hex color"), "recurrence": str("daily|weekly"),
+			"dailyTargetSeconds": map[string]any{"type": "integer", "description": "target per period in seconds (0 = none)"},
+			"maxSeconds": map[string]any{"type": "integer", "description": "lifetime estimate in seconds (overtime alert)"},
+			"description": str("description"), "descriptionAr": str("arabic description"),
+		}, []string{"id"})},
 		{Name: "list_horizons", Description: "List planning horizons (short/medium/long) with their timeline defaults.", InputSchema: obj(map[string]any{}, []string{})},
 		{Name: "update_horizon", Description: "Modify a horizon timeline (e.g. change short from 7 to 14 days).", InputSchema: obj(map[string]any{
 			"key": str("short|medium|long"), "label": str("label"), "labelAr": str("arabic label"), "defaultDays": map[string]any{"type": "integer", "description": "default duration in days"}, "description": str("description"), "descriptionAr": str("arabic description"),
@@ -95,6 +101,10 @@ func tools() []toolDef {
 		{Name: "task_time", Description: "Tracked time for a task: total seconds + history entries.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "get_settings", Description: "Read app settings (appearance: theme, accent, font, radius, density, ...).", InputSchema: obj(map[string]any{}, []string{})},
 		{Name: "set_setting", Description: "Change an app setting, e.g. appearance.theme=light, appearance.accent=emerald.", InputSchema: obj(map[string]any{"key": str("setting key"), "value": str("setting value")}, []string{"key", "value"})},
+		{Name: "start_context_timer", Description: "Start the time tracker on a context goal (runs in parallel with any task timer; auto-pauses any other context timer).", InputSchema: obj(map[string]any{"id": str("context id")}, []string{"id"})},
+		{Name: "stop_context_timer", Description: "Pause the time tracker on a context goal and save the segment.", InputSchema: obj(map[string]any{"id": str("context id")}, []string{"id"})},
+		{Name: "active_context_timer", Description: "Show the currently running context-goal timer, if any.", InputSchema: obj(map[string]any{"day": str("YYYY-MM-DD (default today)")}, []string{})},
+		{Name: "context_time", Description: "Tracked time for a context goal: lifetime total + today's own progress + today's task rollup + history entries.", InputSchema: obj(map[string]any{"id": str("context id"), "day": str("YYYY-MM-DD (default today)")}, []string{"id"})},
 	}
 }
 
@@ -271,23 +281,64 @@ func Run(dbPath string) int {
 				} else {
 					result = textResult(map[string]any{"deleted": getStr("id")})
 				}
-			case "list_contexts":
-				cs, err := s.ListContexts()
-				if err != nil {
-					result = errResult(err)
-				} else {
-					if cs == nil {
-						cs = []store.Context{}
+		case "list_contexts":
+			cs, err := s.ListContexts(getStr("day"))
+			if err != nil {
+				result = errResult(err)
+			} else {
+				if cs == nil {
+					cs = []store.Context{}
+				}
+				result = textResult(cs)
+			}
+		case "create_context":
+			c, err := s.CreateContext(getStr("name"), getStr("color"))
+			if err != nil {
+				result = errResult(err)
+			} else {
+				result = textResult(c)
+			}
+		case "update_context":
+			id := getStr("id")
+			name := getStr("name")
+			color := getStr("color")
+			daily := getInt("dailyTargetSeconds")
+			max := getInt("maxSeconds")
+			rec := getStr("recurrence")
+			desc := getStr("description")
+			descAr := getStr("descriptionAr")
+			if name == "" || color == "" || daily == 0 || max == 0 || rec == "" || desc == "" || descAr == "" {
+				// fill from existing so partial updates work
+				if cur, err := s.GetContext(id, ""); err == nil {
+					if name == "" {
+						name = cur.Name
 					}
-					result = textResult(cs)
+					if color == "" {
+						color = cur.Color
+					}
+					if _, hasDaily := args["dailyTargetSeconds"]; !hasDaily {
+						daily = cur.DailyTarget
+					}
+					if _, hasMax := args["maxSeconds"]; !hasMax {
+						max = cur.MaxSeconds
+					}
+					if rec == "" {
+						rec = cur.Recurrence
+					}
+					if _, hasDesc := args["description"]; !hasDesc {
+						desc = cur.Description
+					}
+					if _, hasDescAr := args["descriptionAr"]; !hasDescAr {
+						descAr = cur.DescriptionAr
+					}
 				}
-			case "create_context":
-				c, err := s.CreateContext(getStr("name"), getStr("color"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(c)
-				}
+			}
+			uc, err := s.UpdateContext(id, name, color, daily, max, rec, desc, descAr)
+			if err != nil {
+				result = errResult(err)
+			} else {
+				result = textResult(uc)
+			}
 			case "list_horizons":
 				hs, err := s.ListHorizons()
 				if err != nil {
@@ -412,6 +463,42 @@ func Run(dbPath string) int {
 				} else {
 					result = textResult(map[string]any{"key": getStr("key"), "value": getStr("value")})
 				}
+		case "start_context_timer":
+			c, err := s.StartContextTimer(getStr("id"))
+			if err != nil {
+				result = errResult(err)
+			} else {
+				result = textResult(c)
+			}
+		case "stop_context_timer":
+			c, err := s.StopContextTimer(getStr("id"))
+			if err != nil {
+				result = errResult(err)
+			} else {
+				result = textResult(c)
+			}
+		case "active_context_timer":
+			c, err := s.GetActiveContextTimer(getStr("day"))
+			if err != nil {
+				result = textResult(map[string]any{"running": false})
+			} else {
+				elapsed, _, _ := s.ContextElapsed(c.ID)
+				result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "context": c})
+			}
+		case "context_time":
+			id := getStr("id")
+			day := getStr("day")
+			c, err := s.GetContext(id, day)
+			if err != nil {
+				result = errResult(err)
+			} else {
+				elapsed, running, _ := s.ContextElapsed(id)
+				entries, _ := s.ListContextEntries(id)
+				if entries == nil {
+					entries = []store.ContextTimeEntry{}
+				}
+				result = textResult(map[string]any{"context": c.Name, "running": running, "totalSeconds": elapsed, "todaySeconds": c.TodaySeconds, "dailyTargetSeconds": c.DailyTarget, "recurrence": c.Recurrence, "weekSeconds": c.WeekSeconds, "tasksTodaySeconds": c.TasksTodaySeconds, "weekTasksSeconds": c.WeekTasksSeconds, "entries": entries})
+			}
 			default:
 				rerr = &rpcErr{Code: -32601, Message: "unknown tool: " + p.Name}
 			}

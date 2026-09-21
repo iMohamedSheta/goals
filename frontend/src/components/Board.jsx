@@ -398,6 +398,35 @@ export function ActiveTimerPill({ t, active, onPause, onResume, onMini, onFinish
   );
 }
 
+/** Header pill for the running context goal — sits next to the task pill; both may run. */
+export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
+  if (!active) return null;
+  const running = !!active.timerStartedAt;
+  const weekly = (active.recurrence || 'daily') === 'weekly';
+  const periodValue = weekly ? (active.weekSeconds || 0) : (active.todaySeconds || 0);
+  const pct = active.dailyTargetSeconds > 0
+    ? Math.min(100, Math.round((periodValue / active.dailyTargetSeconds) * 100))
+    : 0;
+  return (
+    <div className={cn('flex items-center gap-2 border border-violet-500/40 bg-violet-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))}>
+      <span className="size-2 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: active.color || '#8b5cf6' }} />
+      <span className={running ? 'pulse-dot size-2 rounded-full bg-violet-400 text-violet-400' : 'size-2 rounded-full bg-amber-400'} />
+      <span className="max-w-[180px] truncate text-[13px] font-semibold text-violet-200">{active.name}</span>
+      <LiveTime task={{ timerStartedAt: active.timerStartedAt, elapsedSeconds: undefined, elapsed: active.elapsed }} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
+      {active.dailyTargetSeconds > 0 && (
+        <span className="tabular hidden text-[11px] text-violet-300/80 xl:inline" title={weekly ? t.weeklyTarget : t.dailyTarget}>
+          {formatHMS(periodValue)}/{formatHMS(active.dailyTargetSeconds)} · {pct}%
+        </span>
+      )}
+      {running ? (
+        <button title={t.pauseTimer} onClick={onPause} className="rounded-md p-1.5 text-violet-300 hover:bg-violet-500/20"><Pause size={14} /></button>
+      ) : (
+        <button title={t.resumeTimer} onClick={onResume} className="rounded-md p-1.5 text-violet-300 hover:bg-violet-500/20"><Play size={14} /></button>
+      )}
+    </div>
+  );
+}
+
 /** Full-window mini mode: only the timer. Window is small + always on top. */
 export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, onCollapse }) {
   return (

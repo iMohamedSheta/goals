@@ -7,7 +7,7 @@ import {
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Sheet, SheetHeader, SheetBody, SheetFooter } from './ui/sheet';
-import { Input, Label } from './ui/form';
+import { Input, Label, Select } from './ui/form';
 import { ACCENTS, FONTS, surfClass, density, motionClass, RADIUS } from '../lib/appearance';
 import { horizonName } from '../lib/i18n';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
@@ -319,25 +319,85 @@ function ContextsTab({ t, contexts, onCreate, onUpdate, onDelete }) {
   }, [contexts]);
 
   const set = (id, field, v) => setDrafts((ds) => ds.map((d) => (d.id === id ? { ...d, [field]: v } : d)));
+  const setSecs = (id, field, h, m) => set(id, field, (h || 0) * 3600 + (m || 0) * 60);
+  const hm = (secs) => ({ h: Math.floor((secs || 0) / 3600), m: Math.floor(((secs || 0) % 3600) / 60) });
 
   return (
     <div className="space-y-2.5">
-      {drafts.map((d) => (
-        <div key={d.id} className="flex items-center gap-2.5">
-          <input type="color" value={d.color} onChange={(e) => set(d.id, 'color', e.target.value)}
-            className="size-9 shrink-0 cursor-pointer rounded-md border border-input bg-background p-1" />
-          <Input value={d.name} onChange={(e) => set(d.id, 'name', e.target.value)} className="flex-1" />
-          <Button variant="ghost" size="icon-sm" className="shrink-0 hover:bg-destructive/10 hover:text-red-400" onClick={() => onDelete(d)}>
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      ))}
+      {drafts.map((d) => {
+        const daily = hm(d.dailyTargetSeconds);
+        const max = hm(d.maxSeconds);
+        const weekly = (d.recurrence || 'daily') === 'weekly';
+        return (
+          <div key={d.id} className="space-y-3 rounded-xl border bg-card/40 p-3.5">
+            <div className="flex items-center gap-2.5">
+              <input type="color" value={d.color} onChange={(e) => set(d.id, 'color', e.target.value)}
+                className="size-10 shrink-0 cursor-pointer rounded-lg border border-input bg-background p-1.5" />
+              <Input
+                value={d.name} onChange={(e) => set(d.id, 'name', e.target.value)}
+                className="h-10 min-w-0 flex-1 text-sm font-semibold"
+              />
+              <Button variant="ghost" size="icon-sm" className="h-10 w-10 shrink-0 hover:bg-destructive/10 hover:text-red-400" onClick={() => onDelete(d)}>
+                <Trash2 size={15} />
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label={t.descEn}>
+                <Input value={d.description || ''} onChange={(e) => set(d.id, 'description', e.target.value)} dir="ltr" placeholder="e.g. Deep work & clients" />
+              </Field>
+              <Field label={t.descAr}>
+                <Input value={d.descriptionAr || ''} onChange={(e) => set(d.id, 'descriptionAr', e.target.value)} placeholder="مثال: عمل عميق وعملاء" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                <div className="mb-2 flex items-center gap-2">
+                  <Label>{weekly ? t.weeklyTarget : t.dailyTarget}</Label>
+                  <Select
+                    value={d.recurrence || 'daily'}
+                    onChange={(e) => set(d.id, 'recurrence', e.target.value)}
+                    className="ms-auto h-8 w-28 py-1 text-xs font-semibold"
+                  >
+                    <option value="daily">{t.recDaily}</option>
+                    <option value="weekly">{t.recWeekly}</option>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Input type="number" min={0} max={999} value={daily.h}
+                    onChange={(e) => setSecs(d.id, 'dailyTargetSeconds', Math.max(0, parseInt(e.target.value, 10) || 0), daily.m)}
+                    className="h-9 w-20 text-center tabular" />
+                  <span>{t.hoursShort}</span>
+                  <Input type="number" min={0} max={59} value={daily.m}
+                    onChange={(e) => setSecs(d.id, 'dailyTargetSeconds', daily.h, Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+                    className="h-9 w-20 text-center tabular" />
+                  <span>{t.minutesShort}</span>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                <div className="mb-2">
+                  <Label>{t.maxTime} <span className="font-normal text-muted-foreground">· {t.noMax} = 0</span></Label>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Input type="number" min={0} max={999} value={max.h}
+                    onChange={(e) => setSecs(d.id, 'maxSeconds', Math.max(0, parseInt(e.target.value, 10) || 0), max.m)}
+                    className="h-9 w-20 text-center tabular" />
+                  <span>{t.hoursShort}</span>
+                  <Input type="number" min={0} max={59} value={max.m}
+                    onChange={(e) => setSecs(d.id, 'maxSeconds', max.h, Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+                    className="h-9 w-20 text-center tabular" />
+                  <span>{t.minutesShort}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
       {drafts.length === 0 && <p className="py-2 text-center text-sm text-muted-foreground">{t.noContexts}</p>}
-      <div className="flex items-center gap-2.5 rounded-lg border border-dashed p-2.5">
-        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="size-9 shrink-0 cursor-pointer rounded-md border border-input bg-background p-1" />
-        <Input placeholder={t.newCtxPh} value={name} onChange={(e) => setName(e.target.value)} className="flex-1"
+      <div className="flex items-center gap-2.5 rounded-xl border border-dashed p-3">
+        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="size-10 shrink-0 cursor-pointer rounded-lg border border-input bg-background p-1.5" />
+        <Input placeholder={t.newCtxPh} value={name} onChange={(e) => setName(e.target.value)} className="h-10 min-w-0 flex-1"
           onKeyDown={(e) => e.key === 'Enter' && name.trim() && onCreate(name.trim(), color)} />
-        <Button variant="secondary" size="sm" disabled={!name.trim()} onClick={() => onCreate(name.trim(), color)}>
+        <Button variant="secondary" size="sm" className="h-10 shrink-0" disabled={!name.trim()} onClick={() => onCreate(name.trim(), color)}>
           <Plus /> {t.add}
         </Button>
       </div>
@@ -689,9 +749,10 @@ function DataTab({ t, dbPath, onOpenFolder, drive, onImportLocal, onAskRestore, 
 
 const MCP_TOOLS = [
   'list_tasks', 'get_task', 'create_task', 'update_task', 'move_task', 'toggle_focus',
-  'delete_task', 'list_contexts', 'create_context', 'list_horizons', 'update_horizon',
+  'delete_task', 'list_contexts', 'create_context', 'update_context', 'list_horizons', 'update_horizon',
   'create_horizon', 'delete_horizon', 'focus_list', 'stats', 'start_timer', 'stop_timer',
-  'finish_task', 'active_timer', 'task_time', 'get_settings', 'set_setting',
+  'finish_task', 'active_timer', 'task_time', 'start_context_timer', 'stop_context_timer',
+  'active_context_timer', 'context_time', 'get_settings', 'set_setting',
 ];
 
 function aiPromptText(exe) {

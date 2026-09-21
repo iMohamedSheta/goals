@@ -6,7 +6,7 @@ import { Badge } from './components/ui/badge';
 import { Input } from './components/ui/form';
 import { Sidebar } from './components/Sidebar';
 import { Menubar, WindowControls } from './components/Menubar';
-import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, MiniTimer, TimerWidget } from './components/Board';
+import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, ActiveContextPill, MiniTimer, TimerWidget } from './components/Board';
 import { TaskSheet, ConfirmModal } from './components/Dialogs';
 import { ChatDrawer } from './components/ChatDrawer';
 import { SettingsSheet } from './components/SettingsSheet';
@@ -20,6 +20,7 @@ import {
   ListHorizons, UpdateHorizon, CreateHorizon, DeleteHorizon,
   CreateTask, UpdateTask, MoveTask, ToggleFocus, DeleteTask, GetDBPath,
   StartTimer, StopTimer, FinishTask, GetActiveTimer, ListTimeEntries, QuitApp,
+  StartContextTimer, StopContextTimer, GetActiveContextTimer,
   GetSettings, SetSetting, OpenDataFolder, PickDatabaseFile, ExePath,
   GetDriveStatus, SaveDriveCredentials, StartDriveAuth, PollDriveAuth, CancelDriveAuth, DisconnectDrive,
   BackupNow, ListDriveBackups, DeleteDriveBackup, RestoreDriveBackup, ImportDatabaseFile,
@@ -61,6 +62,11 @@ export default function App() {
   const [active, setActive] = React.useState(null); // {id,title,elapsed,timerStartedAt,maxSeconds}
   const [miniMode, setMiniMode] = React.useState(null); // null | 'widget' | 'side'
   const [chatOpen, setChatOpen] = React.useState(false);
+
+  // context goals: every context doubles as a focus goal with its own
+  // timer running in parallel with the task timer
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const [activeContext, setActiveContext] = React.useState(null); // {id,name,color,elapsed,timerStartedAt,maxSeconds,dailyTargetSeconds,recurrence,todaySeconds,weekSeconds}
 
   const [appearance, setAppearance] = React.useState(() => loadLocalAppearance());
   const appearanceRef = React.useRef(appearance);
@@ -107,6 +113,27 @@ export default function App() {
     }
   }, []);
 
+  const refreshContexts = React.useCallback(async () => {
+    const day = todayStr();
+    try {
+      setContexts(await ListContexts(day) || []);
+    } catch {
+      setContexts([]);
+    }
+    try {
+      const a = await GetActiveContextTimer(day);
+      setActiveContext({
+        id: a.id, name: a.name, color: a.color,
+        elapsed: liveElapsed({ elapsedSeconds: a.elapsedSeconds, timerStartedAt: a.timerStartedAt }, Date.now()),
+        timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0,
+        dailyTargetSeconds: a.dailyTargetSeconds || 0, recurrence: a.recurrence || 'daily',
+        todaySeconds: a.todaySeconds || 0, weekSeconds: a.weekSeconds || 0,
+      });
+    } catch {
+      setActiveContext(null);
+    }
+  }, []);
+
   const refresh = React.useCallback(async () => {
     const f = { horizon: 'all', status: 'all', contextId: 'all', focusOnly: false, search: '' };
     if (focusOnly) f.focusOnly = true;
@@ -127,7 +154,8 @@ export default function App() {
     setTasks(board || []);
     setStats(st);
     await syncActive();
-  }, [focusOnly, contextFilter, statusFilter, search, syncActive, horizons]);
+    await refreshContexts();
+  }, [focusOnly, contextFilter, statusFilter, search, syncActive, refreshContexts, horizons]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -141,7 +169,7 @@ export default function App() {
     }, 15000);
     (async () => {
       try {
-        const [hs, cs, db, backendSettings] = await Promise.all([ListHorizons(), ListContexts(), GetDBPath(), GetSettings().catch(() => ({}))]);
+        const [hs, cs, db, backendSettings] = await Promise.all([ListHorizons(), ListContexts(todayStr()), GetDBPath(), GetSettings().catch(() => ({}))]);
         if (cancelled) return;
         setHorizons(hs || []);
         setContexts(cs || []);
@@ -177,6 +205,7 @@ export default function App() {
           applyAppearance(appearanceRef.current);
         }
         await syncActive();
+        await refreshContexts();
         if (cancelled) return;
         clearTimeout(timer);
         setReady(true);
@@ -188,7 +217,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [syncActive]); // eslint-disable-line
+  }, [syncActive, refreshContexts]); // eslint-disable-line
 
   React.useEffect(() => {
     if (ready) refresh().catch((e) => setError(String(e)));
@@ -209,7 +238,25 @@ export default function App() {
         maxSeconds: prev && prev.id === payload.taskId ? prev.maxSeconds : prev?.maxSeconds,
       }));
     });
-    return () => off?.();
+    const offCtx = EventsOn('context:tick', (payload) => {
+      if (!payload) {
+        setActiveContext(null);
+        return;
+      }
+      setActiveContext((prev) => ({
+        id: payload.contextId,
+        name: payload.title,
+        color: prev && prev.id === payload.contextId ? prev.color : prev?.color,
+        elapsed: payload.elapsed,
+        timerStartedAt: prev && prev.id === payload.contextId ? prev.timerStartedAt : prev?.timerStartedAt,
+        maxSeconds: prev && prev.id === payload.contextId ? prev.maxSeconds : prev?.maxSeconds,
+        dailyTargetSeconds: prev && prev.id === payload.contextId ? prev.dailyTargetSeconds : prev?.dailyTargetSeconds,
+        recurrence: prev && prev.id === payload.contextId ? prev.recurrence : prev?.recurrence,
+        todaySeconds: prev && prev.id === payload.contextId ? prev.todaySeconds : prev?.todaySeconds,
+        weekSeconds: prev && prev.id === payload.contextId ? prev.weekSeconds : prev?.weekSeconds,
+      }));
+    });
+    return () => { off?.(); offCtx?.(); };
   }, []);
 
   // debounce search
@@ -266,6 +313,18 @@ export default function App() {
     setFinishConfirm({ open: false, task: null, secs: 0 });
     if (miniMode) exitMini();
     await refresh();
+  };
+
+  // ---------- context-goal actions (parallel timer — independent from task timer) ----------
+
+  const startContext = async (context) => {
+    await StartContextTimer(context.id);
+    await refreshContexts();
+  };
+  const pauseContext = async (contextOrId) => {
+    const id = typeof contextOrId === 'string' ? contextOrId : contextOrId.id;
+    await StopContextTimer(id);
+    await refreshContexts();
   };
 
   const MINI_SIZES = {
@@ -352,6 +411,9 @@ export default function App() {
     } catch {
       try {
         if (active) await StopTimer(active.id);
+      } catch { /* already stopped */ }
+      try {
+        if (activeContext) await StopContextTimer(activeContext.id);
       } catch { /* already stopped */ }
     }
   };
@@ -554,6 +616,8 @@ export default function App() {
         version={version}
         updateAvailable={!!latestTag}
         onOpenUpdates={() => openSettings('data')}
+        onStartContext={startContext}
+        onPauseContext={pauseContext}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -580,6 +644,15 @@ export default function App() {
                 onResume={() => startTimer(active)}
                 onMini={enterMini}
                 onFinish={() => askFinish({ id: active.id, title: active.title, elapsedSeconds: active.elapsed, timerStartedAt: active.timerStartedAt })}
+              />
+            )}
+            {activeContext && (
+              <ActiveContextPill
+                t={t}
+                active={activeContext}
+                ap={appearance}
+                onPause={() => pauseContext(activeContext.id)}
+                onResume={() => startContext(activeContext)}
               />
             )}
             <div className="relative">
@@ -689,18 +762,23 @@ export default function App() {
         onCreateHorizon={createHorizon}
         onDeleteHorizon={deleteHorizon}
         contexts={contexts}
-        onCreateContext={async (n, c) => { await CreateContext(n, c); setContexts(await ListContexts()); }}
+        onCreateContext={async (n, c) => { await CreateContext(n, c); await refreshContexts(); }}
         onUpdateContexts={async (drafts) => {
           for (const d of drafts) {
             const orig = contexts.find((x) => x.id === d.id);
-            if (orig && (orig.name !== d.name || orig.color !== d.color)) await UpdateContext(d.id, d.name, d.color);
+            if (orig && (orig.name !== d.name || orig.color !== d.color
+              || (orig.dailyTargetSeconds || 0) !== (d.dailyTargetSeconds || 0)
+              || (orig.maxSeconds || 0) !== (d.maxSeconds || 0)
+              || (orig.recurrence || 'daily') !== (d.recurrence || 'daily')
+              || (orig.description || '') !== (d.description || '')
+              || (orig.descriptionAr || '') !== (d.descriptionAr || ''))) {
+              await UpdateContext(d.id, d.name, d.color, d.dailyTargetSeconds || 0, d.maxSeconds || 0, d.recurrence || 'daily', d.description || '', d.descriptionAr || '');
+            }
           }
-          setContexts(await ListContexts());
           await refresh();
         }}
         onDeleteContext={async (d) => {
           await DeleteContext(d.id);
-          setContexts(await ListContexts());
           if (contextFilter === d.id) setContextFilter('all');
           await refresh();
         }}

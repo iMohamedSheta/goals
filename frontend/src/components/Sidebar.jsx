@@ -1,7 +1,9 @@
-import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass } from 'lucide-react';
+import * as React from 'react';
+import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass, Play, Pause } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Progress } from './ui/form';
-import { horizonName, horizonDesc } from '../lib/i18n';
+import { horizonName, horizonDesc, formatHMS } from '../lib/i18n';
+import { LiveTime } from './Board';
 import { RADIUS, animClass, DEFAULT_APPEARANCE } from '../lib/appearance';
 
 export const HORIZON_ICONS = { short: CalendarDays, medium: CalendarRange, long: Rocket };
@@ -12,6 +14,92 @@ const fallbackIcon = (key) => {
   return FALLBACK_ICONS[h % FALLBACK_ICONS.length];
 };
 
+function ContextGoalRow({ t, lang, c, selected, onFilter, onStart, onPause }) {
+  const running = !!c.timerStartedAt;
+  const target = c.dailyTargetSeconds || 0;
+  const weekly = (c.recurrence || 'daily') === 'weekly';
+  const periodBase = weekly ? (c.weekSeconds || 0) : (c.todaySeconds || 0);
+  const periodRollup = weekly ? (c.weekTasksSeconds || 0) : (c.tasksTodaySeconds || 0);
+  const periodLabel = weekly ? t.weekLabel : t.todayLabel;
+  const periodDoneLabel = weekly ? t.weekDone : t.dailyDone;
+  const desc = lang === 'ar' ? (c.descriptionAr || c.description) : (c.description || c.descriptionAr);
+  // Period progress ticks live while running: anchor on the last fetched value
+  // and add only the seconds elapsed since that fetch (avoids double counting
+  // the live delta the backend already included in the period value).
+  const [now, setNow] = React.useState(Date.now());
+  const [anchor, setAnchor] = React.useState({ value: periodBase, at: Date.now() });
+  React.useEffect(() => {
+    setAnchor({ value: periodBase, at: Date.now() });
+  }, [periodBase, c.timerStartedAt]); // eslint-disable-line
+  React.useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running, c.timerStartedAt]);
+  const shown = anchor.value + (running ? Math.max(0, Math.floor((now - anchor.at) / 1000)) : 0);
+  const pct = target > 0 ? Math.min(100, Math.round((shown / target) * 100)) : 0;
+  const done = target > 0 && shown >= target;
+  const showTotal = running || (c.elapsedSeconds || 0) > 0;
+  const stop = (e) => { e.stopPropagation(); };
+  return (
+    // Whole card is the filter target — click anywhere except the timer button.
+    <div
+      onClick={onFilter}
+      title={desc || c.name}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onFilter?.(); } }}
+      className={cn(
+        'cursor-pointer overflow-hidden rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        selected ? 'border-primary/40 bg-accent' : 'border-transparent hover:bg-accent/60',
+        running && 'border-violet-500/30 bg-violet-500/5'
+      )}
+    >
+      <div className="flex items-center gap-2.5 px-3 pt-2.5">
+        <span className="size-3 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: c.color }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold leading-tight">{c.name}</span>
+          {desc ? (
+            <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">{desc}</span>
+          ) : null}
+          {target > 0 ? (
+            <span className="tabular mt-1 block truncate text-[11px] leading-none text-muted-foreground">
+              {periodLabel}: {formatHMS(shown)}/{formatHMS(target)} ·{' '}
+              <span className={cn('font-bold', done ? 'text-emerald-400' : 'text-violet-300/90')}>{done ? periodDoneLabel : `${pct}%`}</span>
+            </span>
+          ) : showTotal ? (
+            <span className="tabular mt-1 block text-[11px] leading-none">
+              <LiveTime task={c} className={cn('font-bold', running ? 'text-violet-300' : 'text-muted-foreground')} />
+            </span>
+          ) : null}
+        </span>
+        <button
+          title={running ? t.pauseTimer : t.startTimer}
+          onClick={(e) => { stop(e); (running ? onPause : onStart)?.(); }}
+          className={cn(
+            'grid size-9 shrink-0 place-items-center rounded-lg border transition-colors',
+            running
+              ? 'border-violet-500/40 bg-violet-500/15 text-violet-300 hover:bg-violet-500/25'
+              : 'border-border bg-secondary/60 text-muted-foreground hover:border-violet-500/40 hover:text-violet-300'
+          )}
+        >
+          {running ? <Pause size={15} /> : <Play size={15} />}
+        </button>
+      </div>
+      {target > 0 && (
+        <div className="px-3 pb-2.5 pt-1.5">
+          <Progress value={pct} />
+          {periodRollup > 0 && (
+            <p className="tabular mt-1.5 text-[11px] leading-none text-muted-foreground">
+              +{formatHMS(periodRollup)} {t.fromTasks}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar({
   t, lang, onLangToggle,
   horizons, contexts, counts, focusedCount, stats,
@@ -20,6 +108,7 @@ export function Sidebar({
   timerRunning, onQuit, onSettings,
   version, updateAvailable, onOpenUpdates,
   ap = DEFAULT_APPEARANCE,
+  onStartContext, onPauseContext,
 }) {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e bg-card/50">
@@ -123,17 +212,16 @@ export function Sidebar({
               <span className="flex-1 text-start">{t.allContexts}</span>
             </button>
             {contexts.map((c) => (
-              <button
+              <ContextGoalRow
                 key={c.id}
-                onClick={() => onContextFilter(c.id === contextFilter ? 'all' : c.id)}
-                className={cn(
-                  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
-                  contextFilter === c.id ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
-                )}
-              >
-                <span className="size-2.5 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: c.color }} />
-                <span className="flex-1 truncate text-start">{c.name}</span>
-              </button>
+                t={t}
+                lang={lang}
+                c={c}
+                selected={contextFilter === c.id}
+                onFilter={() => onContextFilter(c.id === contextFilter ? 'all' : c.id)}
+                onStart={() => onStartContext?.(c)}
+                onPause={() => onPauseContext?.(c)}
+              />
             ))}
           </div>
         </div>

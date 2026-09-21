@@ -45,7 +45,13 @@ export function FinishTask(arg1:string):Promise<store.TaskDetail>;
 
 export function GetAIModel():Promise<string>;
 
+export function GetActiveContextTimer(arg1:string):Promise<store.Context>;
+
 export function GetActiveTimer():Promise<store.TaskDetail>;
+
+export function GetContext(arg1:string,arg2:string):Promise<store.Context>;
+
+export function GetContextToday(arg1:string,arg2:string):Promise<number>;
 
 export function GetDBPath():Promise<string>;
 
@@ -65,7 +71,9 @@ export function ImportDatabaseFile(arg1:string):Promise<void>;
 
 export function InstallUpdateAndRestart():Promise<void>;
 
-export function ListContexts():Promise<Array<store.Context>>;
+export function ListContextEntries(arg1:string):Promise<Array<store.ContextTimeEntry>>;
+
+export function ListContexts(arg1:string):Promise<Array<store.Context>>;
 
 export function ListDriveBackups():Promise<Array<drive.BackupFile>>;
 
@@ -95,15 +103,19 @@ export function SetAIModel(arg1:string):Promise<void>;
 
 export function SetSetting(arg1:string,arg2:string):Promise<void>;
 
+export function StartContextTimer(arg1:string):Promise<store.Context>;
+
 export function StartDriveAuth():Promise<drive.DeviceAuth>;
 
 export function StartTimer(arg1:string):Promise<store.TaskDetail>;
+
+export function StopContextTimer(arg1:string):Promise<store.Context>;
 
 export function StopTimer(arg1:string):Promise<store.TaskDetail>;
 
 export function ToggleFocus(arg1:string):Promise<store.TaskDetail>;
 
-export function UpdateContext(arg1:string,arg2:string,arg3:string):Promise<store.Context>;
+export function UpdateContext(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number,arg6:string,arg7:string,arg8:string):Promise<store.Context>;
 
 export function UpdateHorizon(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string):Promise<store.Horizon>;
 

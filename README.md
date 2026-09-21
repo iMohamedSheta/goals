@@ -76,12 +76,16 @@ once a day. (`goals.exe --version` prints the embedded version.)
   - **Planning**: edit all tabs + add/delete custom ones
   - **Contexts**: Work / Life / … manager (rename, recolor, add, delete)
   - **Data**: database path (copy + open folder), local `.db` import, Google Drive backup
-  - **AI**: connect guide — server command, global opencode config, all 22 tools,
+  - **AI**: connect guide — server command, global opencode config, all 27 tools,
     and a ready copy-paste prompt that makes any AI register the server itself
 - **Kanban + List**: toggle per tab; drag & drop between To Do / In Progress / Blocked / Done
 - **Focus mode**: ★ pin tasks, then ★ Focus to see only what matters
 - **Contexts**: Work / Life / Health / Learning seeded; filter chips per context.
   Search with `/`, new task with `Ctrl+K`
+- **Context goals**: every context doubles as a focus goal — set a **daily or weekly
+  target** (e.g. Work 5h/day, Gym 3h/week) and lifetime estimate in Settings → Contexts,
+  run its ▶/⏸ timer in the sidebar in parallel with any task timer, and watch the
+  period ring fill. Task time in the context rolls up underneath as `+X from tasks`
 - **Task editor as side sheet**; **confirmations as centered modals** (delete, finish)
 - **Task timer**: ▶ start / ⏸ pause / ✓ finish on every card and row.
   Set a **max time estimate** per task (hours + minutes in the editor) — when the running
@@ -218,7 +222,7 @@ Any client that speaks MCP over stdio just needs:
 
 ### Tools reference
 
-22 tools, all operating on the shared `goals.db`:
+27 tools, all operating on the shared `goals.db`:
 
 | Tool | What it does | Key params |
 |---|---|---|
@@ -229,8 +233,13 @@ Any client that speaks MCP over stdio just needs:
 | `move_task` | Move kanban column | `id`*, `status`* |
 | `toggle_focus` | Pin/unpin from Focus | `id`* |
 | `delete_task` | Delete | `id`* |
-| `list_contexts` | Work / Life / … | — |
+| `list_contexts` | Work / Life / … — each a goal with daily target + timer | `day` (default today) |
 | `create_context` | New context | `name`*, `color` |
+| `update_context` | Rename/recolor + goal targets (partial ok) | `id`*, `name`, `color`, `recurrence` (daily/weekly), `dailyTargetSeconds`, `maxSeconds` |
+| `start_context_timer` | Start context-goal tracker (parallel with task timer) | `id`* |
+| `stop_context_timer` | Pause + save segment | `id`* |
+| `active_context_timer` | Running context goal + live seconds | `day` |
+| `context_time` | Lifetime total + today + task rollup + history | `id`* |
 | `list_horizons` | Tabs + timeline defaults | — |
 | `update_horizon` | Edit tab (partial ok) | `key`*, `label`, `labelAr`, `defaultDays`, `description`, `descriptionAr` |
 | `create_horizon` | New planning tab | `label`/`labelAr`, `defaultDays`, `description`, `descriptionAr` |
@@ -390,7 +399,7 @@ source-built honnef.co tools instead — same coverage, no version gate.)
 - `main.go` — GUI boot (frameless, hide-on-close, single-instance restore, tray) + `mcp` subcommand switch
 - `app.go` — Wails bindings (CRUD, timer, horizons, settings, quit) + 1s timer ticker (title, tray tooltip, frontend events)
 - `internal/store/store.go` — SQLite schema + queries (`elapsed_seconds`, `timer_started_at`, `time_entries`, `settings`, custom-horizon `position`)
-- `internal/mcp/server.go` — MCP stdio server (protocol 2024-11-05), 22 tools
+- `internal/mcp/server.go` — MCP stdio server (protocol 2024-11-05), 27 tools
 - `internal/tray/` — system-tray icon (Show/Quit, live timer tooltip)
 - `frontend/src/` — React UI: `App.jsx`, `components/` (Board, Sidebar, Menubar, SettingsSheet, sheets…),
   `lib/` (`i18n.js` ar/en, `appearance.js` visuals engine), self-hosted fonts in `assets/fonts`

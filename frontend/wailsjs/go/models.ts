@@ -135,6 +135,17 @@ export namespace store {
 	    name: string;
 	    color: string;
 	    createdAt: string;
+	    description: string;
+	    descriptionAr: string;
+	    dailyTargetSeconds: number;
+	    maxSeconds: number;
+	    elapsedSeconds: number;
+	    timerStartedAt?: string;
+	    todaySeconds: number;
+	    tasksTodaySeconds: number;
+	    recurrence: string;
+	    weekSeconds: number;
+	    weekTasksSeconds: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Context(source);
@@ -146,6 +157,37 @@ export namespace store {
 	        this.name = source["name"];
 	        this.color = source["color"];
 	        this.createdAt = source["createdAt"];
+	        this.description = source["description"];
+	        this.descriptionAr = source["descriptionAr"];
+	        this.dailyTargetSeconds = source["dailyTargetSeconds"];
+	        this.maxSeconds = source["maxSeconds"];
+	        this.elapsedSeconds = source["elapsedSeconds"];
+	        this.timerStartedAt = source["timerStartedAt"];
+	        this.todaySeconds = source["todaySeconds"];
+	        this.tasksTodaySeconds = source["tasksTodaySeconds"];
+	        this.recurrence = source["recurrence"];
+	        this.weekSeconds = source["weekSeconds"];
+	        this.weekTasksSeconds = source["weekTasksSeconds"];
+	    }
+	}
+	export class ContextTimeEntry {
+	    id: string;
+	    contextId: string;
+	    startedAt: string;
+	    endedAt?: string;
+	    seconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContextTimeEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.contextId = source["contextId"];
+	        this.startedAt = source["startedAt"];
+	        this.endedAt = source["endedAt"];
+	        this.seconds = source["seconds"];
 	    }
 	}
 	export class Horizon {

@@ -82,8 +82,20 @@ export function GetAIModel() {
   return window['go']['main']['App']['GetAIModel']();
 }
 
+export function GetActiveContextTimer(arg1) {
+  return window['go']['main']['App']['GetActiveContextTimer'](arg1);
+}
+
 export function GetActiveTimer() {
   return window['go']['main']['App']['GetActiveTimer']();
+}
+
+export function GetContext(arg1, arg2) {
+  return window['go']['main']['App']['GetContext'](arg1, arg2);
+}
+
+export function GetContextToday(arg1, arg2) {
+  return window['go']['main']['App']['GetContextToday'](arg1, arg2);
 }
 
 export function GetDBPath() {
@@ -122,8 +134,12 @@ export function InstallUpdateAndRestart() {
   return window['go']['main']['App']['InstallUpdateAndRestart']();
 }
 
-export function ListContexts() {
-  return window['go']['main']['App']['ListContexts']();
+export function ListContextEntries(arg1) {
+  return window['go']['main']['App']['ListContextEntries'](arg1);
+}
+
+export function ListContexts(arg1) {
+  return window['go']['main']['App']['ListContexts'](arg1);
 }
 
 export function ListDriveBackups() {
@@ -182,12 +198,20 @@ export function SetSetting(arg1, arg2) {
   return window['go']['main']['App']['SetSetting'](arg1, arg2);
 }
 
+export function StartContextTimer(arg1) {
+  return window['go']['main']['App']['StartContextTimer'](arg1);
+}
+
 export function StartDriveAuth() {
   return window['go']['main']['App']['StartDriveAuth']();
 }
 
 export function StartTimer(arg1) {
   return window['go']['main']['App']['StartTimer'](arg1);
+}
+
+export function StopContextTimer(arg1) {
+  return window['go']['main']['App']['StopContextTimer'](arg1);
 }
 
 export function StopTimer(arg1) {
@@ -198,8 +222,8 @@ export function ToggleFocus(arg1) {
   return window['go']['main']['App']['ToggleFocus'](arg1);
 }
 
-export function UpdateContext(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateContext'](arg1, arg2, arg3);
+export function UpdateContext(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['UpdateContext'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
 export function UpdateHorizon(arg1, arg2, arg3, arg4, arg5, arg6) {

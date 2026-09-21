@@ -20,6 +20,32 @@ type Context struct {
 	Name      string `json:"name"`
 	Color     string `json:"color"`
 	CreatedAt string `json:"createdAt"`
+	// Short note shown under the name (e.g. "Deep work & clients").
+	Description   string `json:"description"`
+	DescriptionAr string `json:"descriptionAr"`
+	// Goal fields: every context doubles as a focus goal (e.g. Work 5h/day
+	// or Gym 3h/week). Target is the goal per recurrence period in seconds
+	// (0 = none); MaxSeconds is the lifetime estimate (0 = none, overtime
+	// alert like tasks).
+	DailyTarget       int64   `json:"dailyTargetSeconds"`
+	MaxSeconds        int64   `json:"maxSeconds"`
+	ElapsedSecs       int64   `json:"elapsedSeconds"`
+	TimerStarted      *string `json:"timerStartedAt"`
+	TodaySeconds      int64   `json:"todaySeconds"`
+	TasksTodaySeconds int64   `json:"tasksTodaySeconds"`
+	// Recurrence is the goal period: "daily" or "weekly" (rolling 7 days).
+	// WeekSeconds/WeekTasksSeconds mirror the day fields over that window.
+	Recurrence       string `json:"recurrence"`
+	WeekSeconds      int64  `json:"weekSeconds"`
+	WeekTasksSeconds int64  `json:"weekTasksSeconds"`
+}
+
+type ContextTimeEntry struct {
+	ID        string  `json:"id"`
+	ContextID string  `json:"contextId"`
+	StartedAt string  `json:"startedAt"`
+	EndedAt   *string `json:"endedAt"`
+	Seconds   int64   `json:"seconds"`
 }
 
 type Horizon struct {
@@ -288,6 +314,15 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_entries_task ON time_entries(task_id);`,
+		`CREATE TABLE IF NOT EXISTS context_time_entries (
+			id TEXT PRIMARY KEY,
+			context_id TEXT NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+			started_at TEXT NOT NULL,
+			ended_at TEXT,
+			seconds INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_ctx_entries_ctx ON context_time_entries(context_id);`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''
@@ -306,6 +341,28 @@ func (s *Store) migrate() error {
 		return err
 	}
 	if err := s.ensureColumn("tasks", "max_seconds", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// goal columns on contexts (older DBs lack them; existing rows get zeros)
+	if err := s.ensureColumn("contexts", "daily_target", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "max_seconds", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "elapsed_seconds", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "timer_started_at", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "recurrence", "TEXT NOT NULL DEFAULT 'daily'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "description", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("contexts", "description_ar", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("horizons", "label_ar", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -357,23 +414,149 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// ---------- Contexts ----------
+// ---------- Contexts (each one doubles as a focus goal) ----------
 
-func (s *Store) ListContexts() ([]Context, error) {
-	rows, err := s.db.Query(`SELECT id,name,color,created_at FROM contexts ORDER BY name COLLATE NOCASE`)
+const contextSelect = `SELECT id,name,color,created_at,description,description_ar,daily_target,max_seconds,elapsed_seconds,timer_started_at,recurrence FROM contexts`
+
+func validRecurrence(r string) string {
+	switch strings.TrimSpace(r) {
+	case "weekly":
+		return "weekly"
+	default:
+		return "daily"
+	}
+}
+
+func scanContextRows(rows *sql.Rows) (Context, error) {
+	var c Context
+	var tstarted sql.NullString
+	var recurrence sql.NullString
+	err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt, &c.Description, &c.DescriptionAr, &c.DailyTarget, &c.MaxSeconds, &c.ElapsedSecs, &tstarted, &recurrence)
+	if err != nil {
+		return c, err
+	}
+	if tstarted.Valid {
+		v := tstarted.String
+		c.TimerStarted = &v
+	}
+	c.Recurrence = "daily"
+	if recurrence.Valid && recurrence.String != "" {
+		c.Recurrence = validRecurrence(recurrence.String)
+	}
+	return c, nil
+}
+
+func scanContextRow(row *sql.Row) (Context, error) {
+	var c Context
+	var tstarted sql.NullString
+	var recurrence sql.NullString
+	err := row.Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt, &c.Description, &c.DescriptionAr, &c.DailyTarget, &c.MaxSeconds, &c.ElapsedSecs, &tstarted, &recurrence)
+	if err != nil {
+		return c, err
+	}
+	if tstarted.Valid {
+		v := tstarted.String
+		c.TimerStarted = &v
+	}
+	c.Recurrence = "daily"
+	if recurrence.Valid && recurrence.String != "" {
+		c.Recurrence = validRecurrence(recurrence.String)
+	}
+	return c, nil
+}
+
+func (s *Store) fillContextDay(c *Context, day string) {
+	ts := ""
+	if c.TimerStarted != nil {
+		ts = *c.TimerStarted
+	}
+	today, _ := s.contextOwnDaySum(c.ID, ts, day)
+	c.TodaySeconds = today
+	c.TasksTodaySeconds = s.contextDaySum(c.ID, day)
+	week, _ := s.contextOwnWeekSum(c.ID, ts, day)
+	c.WeekSeconds = week
+	c.WeekTasksSeconds = s.contextWeekSum(c.ID, day)
+}
+
+// weekStart returns the UTC date 6 days before day (rolling 7-day window).
+func weekStart(day string) string {
+	t, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		t = time.Now().UTC()
+	}
+	return t.AddDate(0, 0, -6).Format("2006-01-02")
+}
+
+// contextOwnWeekSum mirrors contextOwnDaySum over the rolling 7-day window.
+func (s *Store) contextOwnWeekSum(id, timerStarted string, day string) (int64, bool) {
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM context_time_entries WHERE context_id=? AND substr(started_at,1,10)>=?`, id, weekStart(day)).Scan(&sum)
+	total := int64(0)
+	if sum.Valid {
+		total = sum.Int64
+	}
+	running := strings.TrimSpace(timerStarted) != ""
+	if running {
+		if start, err := time.Parse(time.RFC3339, timerStarted); err == nil {
+			if d := int64(time.Since(start).Seconds()); d > 0 {
+				total += d
+			}
+		}
+	}
+	return total, running
+}
+
+// contextWeekSum mirrors contextDaySum over the rolling 7-day window.
+func (s *Store) contextWeekSum(ctxID, day string) int64 {
+	if strings.TrimSpace(ctxID) == "" {
+		return 0
+	}
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(e.seconds),0) FROM time_entries e JOIN tasks t ON t.id=e.task_id WHERE t.context_id=? AND substr(e.started_at,1,10)>=?`, ctxID, weekStart(day)).Scan(&sum)
+	if sum.Valid {
+		return sum.Int64
+	}
+	return 0
+}
+
+// ListContexts returns all contexts with per-day goal progress attached.
+func (s *Store) ListContexts(day string) ([]Context, error) {
+	day = normDay(day)
+	rows, err := s.db.Query(contextSelect + ` ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []Context{}
 	for rows.Next() {
-		var c Context
-		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt); err != nil {
+		c, err := scanContextRows(rows)
+		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	// Enrich only after rows are closed: the pool is limited to a single
+	// connection, so nested queries must never run while rows are open.
+	for i := range out {
+		s.fillContextDay(&out[i], day)
+	}
+	return out, nil
+}
+
+// GetContext returns one context with per-day goal progress attached.
+func (s *Store) GetContext(id, day string) (Context, error) {
+	day = normDay(day)
+	c, err := scanContextRow(s.db.QueryRow(contextSelect+` WHERE id=?`, id))
+	if err != nil {
+		return c, err
+	}
+	s.fillContextDay(&c, day)
+	return c, nil
 }
 
 func (s *Store) CreateContext(name, color string) (Context, error) {
@@ -391,20 +574,25 @@ func (s *Store) CreateContext(name, color string) (Context, error) {
 		}
 		return Context{}, err
 	}
-	return c, nil
+	return s.GetContext(c.ID, "")
 }
 
-func (s *Store) UpdateContext(id, name, color string) (Context, error) {
+func (s *Store) UpdateContext(id, name, color string, dailyTarget, maxSeconds int64, recurrence, description, descriptionAr string) (Context, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Context{}, fmt.Errorf("context name is required")
 	}
-	if _, err := s.db.Exec(`UPDATE contexts SET name=?, color=? WHERE id=?`, name, color, id); err != nil {
+	if dailyTarget < 0 {
+		dailyTarget = 0
+	}
+	if maxSeconds < 0 {
+		maxSeconds = 0
+	}
+	recurrence = validRecurrence(recurrence)
+	if _, err := s.db.Exec(`UPDATE contexts SET name=?, color=?, daily_target=?, max_seconds=?, recurrence=?, description=?, description_ar=? WHERE id=?`, name, color, dailyTarget, maxSeconds, recurrence, description, descriptionAr, id); err != nil {
 		return Context{}, err
 	}
-	var c Context
-	err := s.db.QueryRow(`SELECT id,name,color,created_at FROM contexts WHERE id=?`, id).Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt)
-	return c, err
+	return s.GetContext(id, "")
 }
 
 func (s *Store) DeleteContext(id string) error {
@@ -978,7 +1166,15 @@ func (s *Store) StopTimer(id string) (TaskDetail, error) {
 }
 
 // CheckpointRunning folds live deltas into elapsed_seconds (crash safety).
+// It handles both task and context timers, which run independently.
 func (s *Store) CheckpointRunning() error {
+	if err := s.checkpointTasks(); err != nil {
+		return err
+	}
+	return s.checkpointContexts()
+}
+
+func (s *Store) checkpointTasks() error {
 	rows, err := s.db.Query(`SELECT id, elapsed_seconds, timer_started_at FROM tasks WHERE timer_started_at IS NOT NULL`)
 	if err != nil {
 		return err
@@ -1016,6 +1212,52 @@ func (s *Store) CheckpointRunning() error {
 			return err
 		}
 		_, err = s.db.Exec(`INSERT INTO time_entries(id,task_id,started_at,ended_at,seconds,created_at) VALUES(?,?,?,?,?,?)`,
+			uuid.NewString(), r.id, r.started, now.Format(time.RFC3339), delta, nowStr())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) checkpointContexts() error {
+	rows, err := s.db.Query(`SELECT id, elapsed_seconds, timer_started_at FROM contexts WHERE timer_started_at IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type rec struct {
+		id      string
+		stored  int64
+		started string
+	}
+	var recs []rec
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.id, &r.stored, &r.started); err != nil {
+			return err
+		}
+		recs = append(recs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, r := range recs {
+		start, err := time.Parse(time.RFC3339, r.started)
+		if err != nil {
+			continue
+		}
+		delta := int64(now.Sub(start).Seconds())
+		if delta < 1 {
+			continue
+		}
+		_, err = s.db.Exec(`UPDATE contexts SET elapsed_seconds=?, timer_started_at=? WHERE id=? AND timer_started_at=?`,
+			r.stored+delta, now.Format(time.RFC3339), r.id, r.started)
+		if err != nil {
+			return err
+		}
+		_, err = s.db.Exec(`INSERT INTO context_time_entries(id,context_id,started_at,ended_at,seconds,created_at) VALUES(?,?,?,?,?,?)`,
 			uuid.NewString(), r.id, r.started, now.Format(time.RFC3339), delta, nowStr())
 		if err != nil {
 			return err
@@ -1095,6 +1337,203 @@ func (s *Store) ListTimeEntries(taskID string) ([]TimeEntry, error) {
 		var e TimeEntry
 		var ended sql.NullString
 		if err := rows.Scan(&e.ID, &e.TaskID, &e.StartedAt, &ended, &e.Seconds); err != nil {
+			return nil, err
+		}
+		if ended.Valid {
+			v := ended.String
+			e.EndedAt = &v
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ---------- Context goals ----------
+// Every context doubles as a focus goal (e.g. Work 5h/day): it carries its
+// own independent timer (parallel with the task timer), a daily target and a
+// lifetime estimate. Task times in the context roll up as info (TasksToday)
+// next to the context's own tracked time — the two clocks are independent.
+
+// normDay returns today as YYYY-MM-DD (UTC) when s is empty/garbage.
+func normDay(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		return s[:10]
+	}
+	return time.Now().UTC().Format("2006-01-02")
+}
+
+// contextOwnDaySum sums stored context entry seconds for one calendar day
+// (by UTC date prefix of started_at) plus the live running delta, if any.
+func (s *Store) contextOwnDaySum(id, timerStarted string, day string) (int64, bool) {
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM context_time_entries WHERE context_id=? AND substr(started_at,1,10)=?`, id, day).Scan(&sum)
+	total := int64(0)
+	if sum.Valid {
+		total = sum.Int64
+	}
+	running := strings.TrimSpace(timerStarted) != ""
+	if running {
+		if start, err := time.Parse(time.RFC3339, timerStarted); err == nil {
+			if d := int64(time.Since(start).Seconds()); d > 0 {
+				total += d
+			}
+		}
+	}
+	return total, running
+}
+
+// contextDaySum sums task time entries for today whose task sits in ctxID.
+func (s *Store) contextDaySum(ctxID, day string) int64 {
+	if strings.TrimSpace(ctxID) == "" {
+		return 0
+	}
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(e.seconds),0) FROM time_entries e JOIN tasks t ON t.id=e.task_id WHERE t.context_id=? AND substr(e.started_at,1,10)=?`, ctxID, day).Scan(&sum)
+	if sum.Valid {
+		return sum.Int64
+	}
+	return 0
+}
+
+// ---------- Context timer (independent from the task timer; both may run) ----------
+
+// ContextElapsed returns stored seconds + live running delta.
+func (s *Store) ContextElapsed(id string) (int64, bool, error) {
+	var stored int64
+	var tstarted sql.NullString
+	if err := s.db.QueryRow(`SELECT elapsed_seconds, timer_started_at FROM contexts WHERE id=?`, id).Scan(&stored, &tstarted); err != nil {
+		return 0, false, err
+	}
+	if !tstarted.Valid {
+		return stored, false, nil
+	}
+	start, err := time.Parse(time.RFC3339, tstarted.String)
+	if err != nil {
+		return stored, false, nil
+	}
+	d := int64(time.Since(start).Seconds())
+	if d < 0 {
+		d = 0
+	}
+	return stored + d, true, nil
+}
+
+// ContextToday returns today's tracked seconds (stored day segments + live delta).
+func (s *Store) ContextToday(id, day string) (int64, bool, error) {
+	day = normDay(day)
+	var tstarted sql.NullString
+	if err := s.db.QueryRow(`SELECT timer_started_at FROM contexts WHERE id=?`, id).Scan(&tstarted); err != nil {
+		return 0, false, err
+	}
+	ts := ""
+	running := false
+	if tstarted.Valid {
+		ts = tstarted.String
+		running = true
+	}
+	total, _ := s.contextOwnDaySum(id, ts, day)
+	return total, running, nil
+}
+
+func (s *Store) contextStopLocked(id string, now time.Time) (int64, error) {
+	var stored int64
+	var tstarted sql.NullString
+	if err := s.db.QueryRow(`SELECT elapsed_seconds, timer_started_at FROM contexts WHERE id=?`, id).Scan(&stored, &tstarted); err != nil {
+		return 0, err
+	}
+	if !tstarted.Valid {
+		return stored, nil
+	}
+	start, err := time.Parse(time.RFC3339, tstarted.String)
+	if err != nil {
+		_, _ = s.db.Exec(`UPDATE contexts SET timer_started_at=NULL WHERE id=?`, id)
+		return stored, nil
+	}
+	delta := int64(now.Sub(start).Seconds())
+	if delta < 0 {
+		delta = 0
+	}
+	total := stored + delta
+	if _, err := s.db.Exec(`UPDATE contexts SET elapsed_seconds=?, timer_started_at=NULL WHERE id=?`, total, id); err != nil {
+		return 0, err
+	}
+	_, err = s.db.Exec(`INSERT INTO context_time_entries(id,context_id,started_at,ended_at,seconds,created_at) VALUES(?,?,?,?,?,?)`,
+		uuid.NewString(), id, tstarted.String, now.UTC().Format(time.RFC3339), delta, nowStr())
+	return total, err
+}
+
+func (s *Store) runningContextLocked(except string) (string, error) {
+	rows, err := s.db.Query(`SELECT id FROM contexts WHERE timer_started_at IS NOT NULL`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		if id != except {
+			return id, nil
+		}
+	}
+	return "", rows.Err()
+}
+
+// StartContextTimer starts a context goal timer; it pauses any other running
+// context timer but never touches the task timer (parallel by design).
+func (s *Store) StartContextTimer(id string) (Context, error) {
+	if _, err := s.GetContext(id, ""); err != nil {
+		return Context{}, fmt.Errorf("context not found")
+	}
+	now := time.Now().UTC()
+	if other, err := s.runningContextLocked(id); err != nil {
+		return Context{}, err
+	} else if other != "" {
+		if _, err := s.contextStopLocked(other, now); err != nil {
+			return Context{}, err
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE contexts SET timer_started_at=? WHERE id=?`, now.Format(time.RFC3339), id); err != nil {
+		return Context{}, err
+	}
+	return s.GetContext(id, "")
+}
+
+// StopContextTimer pauses a context goal timer and saves the segment.
+func (s *Store) StopContextTimer(id string) (Context, error) {
+	if _, err := s.GetContext(id, ""); err != nil {
+		return Context{}, fmt.Errorf("context not found")
+	}
+	if _, err := s.contextStopLocked(id, time.Now().UTC()); err != nil {
+		return Context{}, err
+	}
+	return s.GetContext(id, "")
+}
+
+// GetActiveContextTimer returns the running context goal, or sql.ErrNoRows.
+func (s *Store) GetActiveContextTimer(day string) (Context, error) {
+	day = normDay(day)
+	c, err := scanContextRow(s.db.QueryRow(contextSelect+` WHERE timer_started_at IS NOT NULL LIMIT 1`))
+	if err != nil {
+		return c, err
+	}
+	s.fillContextDay(&c, day)
+	return c, nil
+}
+
+func (s *Store) ListContextEntries(contextID string) ([]ContextTimeEntry, error) {
+	rows, err := s.db.Query(`SELECT id,context_id,started_at,ended_at,seconds FROM context_time_entries WHERE context_id=? ORDER BY started_at DESC`, contextID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ContextTimeEntry{}
+	for rows.Next() {
+		var e ContextTimeEntry
+		var ended sql.NullString
+		if err := rows.Scan(&e.ID, &e.ContextID, &e.StartedAt, &ended, &e.Seconds); err != nil {
 			return nil, err
 		}
 		if ended.Valid {
