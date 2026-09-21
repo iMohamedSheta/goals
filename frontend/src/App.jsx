@@ -263,6 +263,7 @@ export default function App() {
         name: payload.title,
         color: prev && prev.id === payload.contextId ? prev.color : prev?.color,
         elapsed: payload.elapsed,
+        elapsedSeconds: prev && prev.id === payload.contextId ? prev.elapsedSeconds : prev?.elapsedSeconds,
         timerStartedAt: prev && prev.id === payload.contextId ? prev.timerStartedAt : prev?.timerStartedAt,
         maxSeconds: prev && prev.id === payload.contextId ? prev.maxSeconds : prev?.maxSeconds,
         dailyTargetSeconds: prev && prev.id === payload.contextId ? prev.dailyTargetSeconds : prev?.dailyTargetSeconds,

@@ -697,7 +697,7 @@ export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
       <span className="size-2 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: active.color || '#8b5cf6' }} />
       <span className={running ? 'pulse-dot size-2 rounded-full bg-violet-400 text-violet-400' : 'size-2 rounded-full bg-amber-400'} />
       <span className="max-w-[180px] truncate text-[13px] font-semibold text-violet-200">{active.name}</span>
-      <LiveTime task={{ timerStartedAt: active.timerStartedAt, elapsedSeconds: active.elapsedSeconds ?? active.elapsed }} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
+      <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
       {active.dailyTargetSeconds > 0 && (
         <span className="tabular hidden text-[11px] text-violet-300/80 xl:inline" title={weekly ? t.weeklyTarget : t.dailyTarget}>
           {formatHMS(periodValue)}/{formatHMS(active.dailyTargetSeconds)} · {pct}%
@@ -765,7 +765,8 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
                   <span className="max-w-[200px] truncate text-[13px] font-bold">{ctx.name}</span>
                 </div>
                 <LiveTime
-                  task={{ timerStartedAt: ctx.timerStartedAt, elapsedSeconds: ctx.elapsedSeconds ?? ctx.elapsed }}
+                  task={ctx}
+                  elapsed={ctx.elapsed}
                   max={ctx.maxSeconds}
                   className={active ? 'text-2xl font-black tabular tracking-tight text-violet-300' : 'text-4xl font-black tabular tracking-tight text-violet-300'}
                   showBadge
