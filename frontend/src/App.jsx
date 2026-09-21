@@ -69,6 +69,8 @@ export default function App() {
   // timer running in parallel with the task timer
   const todayStr = () => new Date().toISOString().slice(0, 10);
   const [activeContext, setActiveContext] = React.useState(null); // {id,name,color,elapsed,timerStartedAt,maxSeconds,dailyTargetSeconds,recurrence,todaySeconds,weekSeconds}
+  // last context seen running — lets the mini window offer resume after a stop
+  const lastCtxRef = React.useRef(null);
 
   const [appearance, setAppearance] = React.useState(() => loadLocalAppearance());
   const appearanceRef = React.useRef(appearance);
@@ -134,10 +136,12 @@ export default function App() {
       setActiveContext({
         id: a.id, name: a.name, color: a.color,
         elapsed: liveElapsed({ elapsedSeconds: a.elapsedSeconds, timerStartedAt: a.timerStartedAt }, Date.now()),
+        elapsedSeconds: a.elapsedSeconds || 0,
         timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0,
         dailyTargetSeconds: a.dailyTargetSeconds || 0, recurrence: a.recurrence || 'daily',
         todaySeconds: a.todaySeconds || 0, weekSeconds: a.weekSeconds || 0,
       });
+      lastCtxRef.current = { id: a.id, name: a.name, color: a.color };
     } catch {
       setActiveContext(null);
     }
@@ -337,9 +341,13 @@ export default function App() {
     await StopContextTimer(id);
     await refreshContexts();
   };
+  const resumeLastContext = async () => {
+    if (lastCtxRef.current) await startContext(lastCtxRef.current);
+  };
 
   const MINI_SIZES = {
     widget: { w: 216, h: 54, minW: 200, minH: 48 },
+    widget2: { w: 232, h: 92, minW: 210, minH: 80 },
     side: { w: 320, h: 470, minW: 300, minH: 420 },
   };
 
@@ -384,8 +392,14 @@ export default function App() {
     } catch { /* noop */ }
   };
 
+  // grow the widget bar when both timers run so each stays visible
+  React.useEffect(() => {
+    if (miniMode !== 'widget') return;
+    applyMiniWindow(active && activeContext ? 'widget2' : 'widget');
+  }, [miniMode, active?.id, activeContext?.id]); // eslint-disable-line
+
   const enterMini = async () => {
-    if (!active) return;
+    if (!active && !activeContext) return;
     // capture pre-mini state before applyMiniWindow clears it
     try {
       const [fs, mx] = await Promise.all([safeFlag(WindowIsFullscreen), safeFlag(WindowIsMaximised)]);
@@ -548,6 +562,8 @@ export default function App() {
             <TimerWidget
               t={t}
               active={active}
+              ctx={activeContext}
+              lastCtx={activeContext ? null : lastCtxRef.current}
               onExpand={expandWidget}
             />
           ) : (
@@ -559,6 +575,11 @@ export default function App() {
               onFinish={(a) => askFinish(a.id ? { id: a.id, title: a.title, elapsedSeconds: a.elapsed, timerStartedAt: a.timerStartedAt } : a)}
               onExpand={exitMini}
               onCollapse={collapseWidget}
+              ctx={activeContext}
+              onPauseCtx={() => activeContext && pauseContext(activeContext.id)}
+              onResumeCtx={() => activeContext && startContext(activeContext)}
+              lastCtx={activeContext ? null : lastCtxRef.current}
+              onResumeLastCtx={resumeLastContext}
             />
           )}
         </div>
@@ -621,7 +642,7 @@ export default function App() {
         view={view}
         focusOnly={focusOnly}
         hasFilters={hasFilters}
-        timerRunning={!!active}
+        timerRunning={!!active || !!activeContext}
         onNewTask={() => openTaskSheet(null, 'todo')}
         onView={setView}
         onHorizon={(h) => { setActiveHorizon(h); setFocusOnly(false); }}
@@ -650,7 +671,7 @@ export default function App() {
         contextFilter={contextFilter}
         onContextFilter={setContextFilter}
         dbPath={dbPath}
-        timerRunning={!!active}
+        timerRunning={!!active || !!activeContext}
         onQuit={quitApp}
         onSettings={() => openSettings('appearance')}
         onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}

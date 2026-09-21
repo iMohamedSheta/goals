@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"goals/internal/alert"
 	"goals/internal/drive"
 	"goals/internal/store"
 	"goals/internal/tray"
@@ -649,6 +650,7 @@ func (a *App) notifyOvertimeOnce(id, title string, elapsed, max int64) {
 	msg := fmt.Sprintf("%s\nExpected %s — now at %s. You've exceeded your estimate.", title, formatHMS(max), formatHMS(elapsed))
 	go func() {
 		_ = beeep.Notify("Goals — max time finished", msg, "")
+		alert.Play()
 	}()
 	runtime.EventsEmit(a.ctx, "timer:overtime", map[string]any{
 		"taskId": id, "title": title, "elapsed": elapsed, "max": max,

@@ -196,3 +196,47 @@ func TestContextGoalParallelTimers(t *testing.T) {
 		t.Fatalf("checkpoint: %v", err)
 	}
 }
+
+func TestContextTimerResumeStopStart(t *testing.T) {
+	s := openTestStore(t)
+	ctx, err := s.CreateContext("ResumeGoal", "#8b5cf6")
+	if err != nil {
+		t.Fatalf("create context: %v", err)
+	}
+	if _, err := s.StartContextTimer(ctx.ID); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := s.StopContextTimer(ctx.ID); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	first, running, err := s.ContextElapsed(ctx.ID)
+	if err != nil || running {
+		t.Fatalf("elapsed=%d running=%v err=%v", first, running, err)
+	}
+	if first < 1 {
+		t.Fatalf("expected >=1s after first run, got %d", first)
+	}
+	// restarting must resume counting from the saved total, not reset it
+	if _, err := s.StartContextTimer(ctx.ID); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	second, running, err := s.ContextElapsed(ctx.ID)
+	if err != nil || !running {
+		t.Fatalf("elapsed=%d running=%v err=%v", second, running, err)
+	}
+	if second < first+1 {
+		t.Fatalf("timer did not resume: first=%d second=%d", first, second)
+	}
+	if _, err := s.StopContextTimer(ctx.ID); err != nil {
+		t.Fatalf("final stop: %v", err)
+	}
+	final, running, err := s.ContextElapsed(ctx.ID)
+	if err != nil || running {
+		t.Fatalf("elapsed=%d running=%v err=%v", final, running, err)
+	}
+	if final < first+1 {
+		t.Fatalf("stopped total lost time: first=%d final=%d", first, final)
+	}
+}

@@ -697,7 +697,7 @@ export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
       <span className="size-2 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: active.color || '#8b5cf6' }} />
       <span className={running ? 'pulse-dot size-2 rounded-full bg-violet-400 text-violet-400' : 'size-2 rounded-full bg-amber-400'} />
       <span className="max-w-[180px] truncate text-[13px] font-semibold text-violet-200">{active.name}</span>
-      <LiveTime task={{ timerStartedAt: active.timerStartedAt, elapsedSeconds: undefined, elapsed: active.elapsed }} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
+      <LiveTime task={{ timerStartedAt: active.timerStartedAt, elapsedSeconds: active.elapsedSeconds ?? active.elapsed }} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
       {active.dailyTargetSeconds > 0 && (
         <span className="tabular hidden text-[11px] text-violet-300/80 xl:inline" title={weekly ? t.weeklyTarget : t.dailyTarget}>
           {formatHMS(periodValue)}/{formatHMS(active.dailyTargetSeconds)} · {pct}%
@@ -712,8 +712,10 @@ export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
   );
 }
 
-/** Full-window mini mode: only the timer. Window is small + always on top. */
-export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, onCollapse }) {
+/** Full-window mini mode: task timer + context-goal timer. Small + always on top. */
+export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, onCollapse, ctx, onPauseCtx, onResumeCtx, lastCtx, onResumeLastCtx }) {
+  const showCtx = !!ctx;
+  const ctxRunning = !!ctx?.timerStartedAt;
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex h-8 shrink-0 select-none items-center border-b px-1" style={{ ['--wails-draggable']: 'drag' }}>
@@ -722,8 +724,8 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
           <MiniCap t={t} onExpand={onExpand} />
         </span>
       </div>
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-        {!active ? (
+      <div className="thin-scroll flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto px-6 py-3 text-center">
+        {!active && !showCtx ? (
           <>
             <TimerIcon size={22} className="text-muted-foreground" />
             <p className="text-sm text-muted-foreground">{t.noActiveTimer}</p>
@@ -731,23 +733,67 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
           </>
         ) : (
           <>
-            <div className="flex items-center gap-2">
-              <span className={active.timerStartedAt ? 'pulse-dot size-2.5 rounded-full bg-emerald-400 text-emerald-400' : 'size-2.5 rounded-full bg-amber-400'} />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {active.timerStartedAt ? t.running : t.paused}
-              </span>
-            </div>
-            <h2 className="line-clamp-2 max-w-full text-[15px] font-bold leading-snug">{active.title}</h2>
-            <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-4xl font-black tabular tracking-tight text-emerald-300" showBadge badgeLabel={t.overtime} />
-            <div className="mt-1 flex items-center gap-2">
-              {active.timerStartedAt ? (
-                <Button size="sm" variant="secondary" onClick={onPause}><Pause /> {t.pauseTimer}</Button>
-              ) : (
-                <Button size="sm" variant="secondary" onClick={onResume}><Play /> {t.resumeTimer}</Button>
-              )}
-              <Button size="sm" onClick={() => onFinish(active)} className="bg-emerald-600 hover:bg-emerald-500"><Check /> {t.finishTask}</Button>
-              <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
-            </div>
+            {active && (
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <span className={active.timerStartedAt ? 'pulse-dot size-2.5 rounded-full bg-emerald-400 text-emerald-400' : 'size-2.5 rounded-full bg-amber-400'} />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {active.timerStartedAt ? t.running : t.paused}
+                  </span>
+                </div>
+                <h2 className="line-clamp-2 max-w-full text-[15px] font-bold leading-snug">{active.title}</h2>
+                <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-4xl font-black tabular tracking-tight text-emerald-300" showBadge badgeLabel={t.overtime} />
+                {active.maxSeconds > 0 && (
+                  <span className="tabular text-[11px] text-muted-foreground">{t.maxTime}: {formatHMS(active.maxSeconds)}</span>
+                )}
+                <div className="mt-1 flex items-center gap-2">
+                  {active.timerStartedAt ? (
+                    <Button size="sm" variant="secondary" onClick={onPause}><Pause /> {t.pauseTimer}</Button>
+                  ) : (
+                    <Button size="sm" variant="secondary" onClick={onResume}><Play /> {t.resumeTimer}</Button>
+                  )}
+                  <Button size="sm" onClick={() => onFinish(active)} className="bg-emerald-600 hover:bg-emerald-500"><Check /> {t.finishTask}</Button>
+                  <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
+                </div>
+              </div>
+            )}
+            {showCtx && (
+              <div className={active ? 'flex w-full flex-col items-center gap-1.5 border-t border-violet-500/20 pt-3' : 'flex flex-col items-center gap-2'}>
+                <div className="flex items-center gap-2">
+                  <span className="size-2.5 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: ctx.color || '#8b5cf6' }} />
+                  <span className={ctxRunning ? 'pulse-dot size-2.5 rounded-full bg-violet-400 text-violet-400' : 'size-2.5 rounded-full bg-amber-400'} />
+                  <span className="max-w-[200px] truncate text-[13px] font-bold">{ctx.name}</span>
+                </div>
+                <LiveTime
+                  task={{ timerStartedAt: ctx.timerStartedAt, elapsedSeconds: ctx.elapsedSeconds ?? ctx.elapsed }}
+                  max={ctx.maxSeconds}
+                  className={active ? 'text-2xl font-black tabular tracking-tight text-violet-300' : 'text-4xl font-black tabular tracking-tight text-violet-300'}
+                  showBadge
+                  badgeLabel={t.overtime}
+                />
+                {ctx.maxSeconds > 0 && (
+                  <span className="tabular text-[11px] text-muted-foreground">{t.maxTime}: {formatHMS(ctx.maxSeconds)}</span>
+                )}
+                <div className="mt-0.5 flex items-center gap-2">
+                  {ctxRunning ? (
+                    <Button size="sm" variant="secondary" onClick={onPauseCtx}><Pause /> {t.pauseTimer}</Button>
+                  ) : (
+                    <Button size="sm" variant="secondary" onClick={onResumeCtx}><Play /> {t.resumeTimer}</Button>
+                  )}
+                  {!active && (
+                    <Button size="sm" variant="ghost" onClick={onExpand} title={t.expand}><Maximize2 /></Button>
+                  )}
+                </div>
+              </div>
+            )}
+            {!showCtx && lastCtx && (
+              <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-violet-500/30 px-5 py-2.5">
+                <span className="max-w-[200px] truncate text-xs font-semibold text-violet-200/80">
+                  {lastCtx.name} · {t.paused}
+                </span>
+                <Button size="sm" variant="secondary" onClick={onResumeLastCtx}><Play /> {t.resumeTimer}</Button>
+              </div>
+            )}
             {onCollapse && (
               <button onClick={onCollapse} title={t.collapse} className="mt-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
                 <Minimize2 size={12} /> {t.collapse}
@@ -760,8 +806,24 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
   );
 }
 
-/** Tiny side-docked horizontal bar: dot + time + title. Click expands to the side view. */
-export function TimerWidget({ t, active, onExpand }) {
+/** Side-docked mini bar: task and/or context timer rows. Click expands to the side view. */
+export function TimerWidget({ t, active, ctx, lastCtx, onExpand }) {
+  const taskRow = active && {
+    timerStartedAt: active.timerStartedAt,
+    elapsed: active.elapsed,
+    maxSeconds: active.maxSeconds,
+    title: active.title,
+    violet: false,
+  };
+  const ctxRow = ctx && {
+    timerStartedAt: ctx.timerStartedAt,
+    elapsedSeconds: ctx.elapsedSeconds ?? ctx.elapsed,
+    elapsed: ctx.elapsed,
+    maxSeconds: ctx.maxSeconds,
+    title: ctx.name,
+    violet: true,
+  };
+  const rows = [taskRow, ctxRow].filter(Boolean);
   return (
     <div
       className="flex h-full cursor-pointer items-center gap-2 bg-background px-2.5"
@@ -769,16 +831,28 @@ export function TimerWidget({ t, active, onExpand }) {
       onClick={onExpand}
       onDoubleClick={onExpand}
     >
-      {!active ? (
+      {rows.length === 0 ? (
         <>
           <TimerIcon size={15} className="shrink-0 text-muted-foreground" />
-          <p className="truncate text-[11px] text-muted-foreground">{t.noActiveTimer}</p>
+          <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {lastCtx ? `${lastCtx.name} · ${t.paused}` : t.noActiveTimer}
+          </p>
+          <span style={{ ['--wails-draggable']: 'no-drag' }} className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+            <button title={t.expand} onClick={onExpand} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><ChevronsUp size={14} /></button>
+            <button title={t.winHide} onClick={() => WindowHide()} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><X size={14} /></button>
+          </span>
         </>
       ) : (
         <>
-          <span className={active.timerStartedAt ? 'pulse-dot size-2 shrink-0 rounded-full bg-emerald-400 text-emerald-400' : 'size-2 shrink-0 rounded-full bg-amber-400'} />
-          <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="shrink-0 text-[13px] font-black tabular tracking-tight text-emerald-300" />
-          <p className="min-w-0 flex-1 truncate text-start text-[11px] font-semibold">{active.title}</p>
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+            {rows.map((r, i) => (
+              <div key={i} className="flex min-w-0 items-center gap-1.5">
+                <span className={r.timerStartedAt ? `pulse-dot size-1.5 shrink-0 rounded-full ${r.violet ? 'bg-violet-400 text-violet-400' : 'bg-emerald-400 text-emerald-400'}` : 'size-1.5 shrink-0 rounded-full bg-amber-400'} />
+                <LiveTime task={r} elapsed={r.elapsed} max={r.maxSeconds} className={`shrink-0 text-[12px] font-black tabular tracking-tight ${r.violet ? 'text-violet-300' : 'text-emerald-300'}`} />
+                <p className="min-w-0 flex-1 truncate text-start text-[10px] font-semibold">{r.title}</p>
+              </div>
+            ))}
+          </div>
           <span style={{ ['--wails-draggable']: 'no-drag' }} className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
             <button title={t.expand} onClick={onExpand} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><ChevronsUp size={14} /></button>
             <button title={t.winHide} onClick={() => WindowHide()} className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><X size={14} /></button>

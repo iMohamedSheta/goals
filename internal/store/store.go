@@ -1315,25 +1315,6 @@ func (s *Store) stopLocked(id string, now time.Time) (int64, error) {
 	return total, err
 }
 
-// runningTaskLocked returns the id of the currently running timer, if any.
-func (s *Store) runningTaskLocked(except string) (string, error) {
-	rows, err := s.db.Query(`SELECT id FROM tasks WHERE timer_started_at IS NOT NULL`)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return "", err
-		}
-		if id != except {
-			return id, nil
-		}
-	}
-	return "", rows.Err()
-}
-
 // runningTaskIDs returns all task timers currently running.
 func (s *Store) runningTaskIDs() ([]string, error) {
 	rows, err := s.db.Query(`SELECT id FROM tasks WHERE timer_started_at IS NOT NULL`)
