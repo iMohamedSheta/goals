@@ -18,8 +18,8 @@ import {
 import {
   ListTasks, GetStats, ListContexts, CreateContext, UpdateContext, DeleteContext,
   ListHorizons, UpdateHorizon, CreateHorizon, DeleteHorizon,
-  CreateTask, UpdateTask, MoveTask, ToggleFocus, DeleteTask, GetDBPath,
-  StartTimer, StopTimer, FinishTask, GetActiveTimer, ListTimeEntries, QuitApp,
+  CreateTask, UpdateTask, MoveTask, SetTaskParent, ReorderTasks, ToggleFocus, DeleteTask, GetDBPath,
+  StartTimer, StopTimer, FinishTask, GetActiveTimer, GetActiveTimers, ListTimeEntries, QuitApp,
   StartContextTimer, StopContextTimer, GetActiveContextTimer,
   GetSettings, SetSetting, OpenDataFolder, PickDatabaseFile, ExePath,
   GetDriveStatus, SaveDriveCredentials, StartDriveAuth, PollDriveAuth, CancelDriveAuth, DisconnectDrive,
@@ -27,6 +27,7 @@ import {
   GetVersion, CheckForUpdates, DownloadUpdate, InstallUpdateAndRestart,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload, WindowUnfullscreen, WindowUnmaximise, WindowMaximise, WindowIsFullscreen, WindowIsMaximised } from '../wailsjs/runtime/runtime';
+import brandLogo from './assets/logo.png';
 
 export default function App() {
   const [lang, setLang] = React.useState(() => localStorage.getItem('goals-lang') || 'ar');
@@ -51,7 +52,7 @@ export default function App() {
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [search, setSearch] = React.useState('');
 
-  const [sheet, setSheet] = React.useState({ open: false, task: null, presetStatus: 'todo' });
+  const [sheet, setSheet] = React.useState({ open: false, task: null, presetStatus: 'todo', presetParentId: '' });
   const [entries, setEntries] = React.useState([]);
   const [settings, setSettings] = React.useState({ open: false, tab: 'appearance' });
   const openSettings = (tab) => setSettings({ open: true, tab: tab || 'appearance' });
@@ -60,6 +61,7 @@ export default function App() {
   const [restoreConfirm, setRestoreConfirm] = React.useState({ open: false, id: null, name: '' });
 
   const [active, setActive] = React.useState(null); // {id,title,elapsed,timerStartedAt,maxSeconds}
+  const [activeCount, setActiveCount] = React.useState(1);
   const [miniMode, setMiniMode] = React.useState(null); // null | 'widget' | 'side'
   const [chatOpen, setChatOpen] = React.useState(false);
 
@@ -107,9 +109,16 @@ export default function App() {
   const syncActive = React.useCallback(async () => {
     try {
       const a = await GetActiveTimer();
+      let count = 1;
+      try {
+        const all = await GetActiveTimers();
+        if (Array.isArray(all) && all.length > 0) count = all.length;
+      } catch { /* single-timer fallback */ }
+      setActiveCount(count);
       setActive({ id: a.id, title: a.title, elapsed: liveElapsed(a, Date.now()), timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0 });
     } catch {
       setActive(null);
+      setActiveCount(1);
     }
   }, []);
 
@@ -228,8 +237,10 @@ export default function App() {
     const off = EventsOn('timer:tick', (payload) => {
       if (!payload) {
         setActive(null);
+        setActiveCount(1);
         return;
       }
+      if (payload.count) setActiveCount(payload.count);
       setActive((prev) => ({
         id: payload.taskId,
         title: payload.title,
@@ -282,7 +293,7 @@ export default function App() {
       if (e.key === '/' && !typing) { e.preventDefault(); searchRef.current?.focus(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSheet({ open: true, task: null, presetStatus: 'todo' });
+        setSheet({ open: true, task: null, presetStatus: 'todo', presetParentId: '' });
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
@@ -418,7 +429,7 @@ export default function App() {
     }
   };
 
-  const openTaskSheet = async (task, presetStatus) => {
+  const openTaskSheet = async (task, presetStatus, presetParentId) => {
     if (task) {
       try {
         setEntries(await ListTimeEntries(task.id));
@@ -428,16 +439,45 @@ export default function App() {
     } else {
       setEntries([]);
     }
-    setSheet({ open: true, task: task || null, presetStatus: presetStatus || 'todo' });
+    setSheet({ open: true, task: task || null, presetStatus: presetStatus || 'todo', presetParentId: presetParentId || '' });
   };
 
   const saveTask = async (input) => {
-    if (sheet.task) await UpdateTask(sheet.task.id, input);
-    else {
+    if (sheet.task) {
+      await UpdateTask(sheet.task.id, input);
+      // Parent changes for existing tasks go through the dedicated nest API
+      // (UpdateTask preserves the link) so drag cycles stay guarded backend-side.
+      if ((input.parentId || '') !== (sheet.task.parentId || '')) {
+        try {
+          await SetTaskParent(sheet.task.id, input.parentId || '');
+        } catch (err) {
+          alert(String(err?.message || err));
+        }
+      }
+    } else {
       const created = await CreateTask(input);
       if (created?.horizon) setActiveHorizon(created.horizon);
     }
-    setSheet({ open: false, task: null, presetStatus: 'todo' });
+    setSheet({ open: false, task: null, presetStatus: 'todo', presetParentId: '' });
+    await refresh();
+  };
+
+  // Unified drag handler: optional parent nest + status move + manual order.
+  const handleTaskMove = async (dragId, patch) => {
+    try {
+      const cur = tasks.find((x) => x.id === dragId);
+      if (patch.parentId !== undefined && (cur?.parentId || null) !== (patch.parentId || null)) {
+        await SetTaskParent(dragId, patch.parentId || '');
+      }
+      if (patch.status && cur?.status !== patch.status) {
+        await MoveTask(dragId, patch.status);
+      }
+      if (patch.orderedIds?.length) {
+        await ReorderTasks(patch.orderedIds);
+      }
+    } catch (err) {
+      alert(String(err?.message || err));
+    }
     await refresh();
   };
 
@@ -558,7 +598,8 @@ export default function App() {
         <div className="absolute end-0 top-0" style={{ ['--wails-draggable']: 'drag' }}>
           <WindowControls t={t} small />
         </div>
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <img src={brandLogo} alt="Goals" className="w-44 shrink-0 rounded-2xl" />
+        <div className="mt-5 flex items-center gap-3 text-sm text-muted-foreground">
           <span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           {t.loading}
         </div>
@@ -639,6 +680,7 @@ export default function App() {
               <ActiveTimerPill
                 t={t}
                 active={active}
+                activeCount={activeCount}
                 ap={appearance}
                 onPause={() => pauseTimer(active.id)}
                 onResume={() => startTimer(active)}
@@ -712,6 +754,8 @@ export default function App() {
               onPause={pauseTimer}
               onFinish={askFinish}
               onDrop={async (id, status) => { await MoveTask(id, status); await refresh(); }}
+              onTaskMove={handleTaskMove}
+              onAddSubtask={(parent) => openTaskSheet(null, parent.status, parent.id)}
               onCreateFirst={() => openTaskSheet(null, 'todo')}
             />
           ) : (
@@ -727,6 +771,8 @@ export default function App() {
                 onStart={startTimer}
                 onPause={pauseTimer}
                 onFinish={askFinish}
+                onTaskMove={handleTaskMove}
+                onAddSubtask={(parent) => openTaskSheet(null, parent.status, parent.id)}
               />
             </div>
           )}
@@ -737,12 +783,14 @@ export default function App() {
       <TaskSheet
         t={t}
         open={sheet.open}
-        onClose={() => setSheet({ open: false, task: null, presetStatus: 'todo' })}
+        onClose={() => setSheet({ open: false, task: null, presetStatus: 'todo', presetParentId: '' })}
         task={sheet.task}
         horizons={horizons}
         contexts={contexts}
         activeHorizon={activeHorizon}
         presetStatus={sheet.presetStatus}
+        presetParentId={sheet.presetParentId}
+        tasks={tasks}
         onSave={saveTask}
         entries={entries}
       />

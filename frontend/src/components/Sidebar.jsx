@@ -5,6 +5,8 @@ import { Progress } from './ui/form';
 import { horizonName, horizonDesc, formatHMS } from '../lib/i18n';
 import { LiveTime } from './Board';
 import { RADIUS, animClass, DEFAULT_APPEARANCE } from '../lib/appearance';
+import sideLogoDark from '../assets/side-logo-dark.png';
+import sideLogoLight from '../assets/side-logo-light.png';
 
 export const HORIZON_ICONS = { short: CalendarDays, medium: CalendarRange, long: Rocket };
 const FALLBACK_ICONS = [Flag, Target, Compass, Hourglass];
@@ -112,21 +114,19 @@ export function Sidebar({
 }) {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e bg-card/50">
-      <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-primary shadow-lg shadow-primary/25">
-          <Rocket className="text-primary-foreground" size={18} />
+      <div className="px-5 pb-4 pt-6">
+        <div className="flex items-center gap-2">
+          <img src={sideLogoLight} alt="Goals" className="h-10 w-auto min-w-0 flex-1 object-contain object-left dark:hidden" />
+          <img src={sideLogoDark} alt="Goals" className="hidden h-10 w-auto min-w-0 flex-1 object-contain object-left dark:block" />
+          <button
+            onClick={onLangToggle}
+            className="flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+            title="Language / اللغة"
+          >
+            <Languages size={12} /> {t.langName}
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[15px] font-bold leading-none tracking-tight">Goals</h1>
-          <p className="mt-1 text-[11px] leading-none text-muted-foreground">{t.tagline}</p>
-        </div>
-        <button
-          onClick={onLangToggle}
-          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-          title="Language / اللغة"
-        >
-          <Languages size={12} /> {t.langName}
-        </button>
+        <p className="mt-2 text-[11px] leading-none text-muted-foreground">{t.tagline}</p>
       </div>
 
       <div className="flex-1 space-y-6 overflow-y-auto px-3">

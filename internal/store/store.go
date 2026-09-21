@@ -65,6 +65,7 @@ type Task struct {
 	Horizon       string  `json:"horizon"`
 	Status        string  `json:"status"`
 	ContextID     *string `json:"contextId"`
+	ParentID      *string `json:"parentId"`
 	Priority      string  `json:"priority"`
 	StartDate     *string `json:"startDate"`
 	DueDate       *string `json:"dueDate"`
@@ -90,6 +91,7 @@ type TaskDetail struct {
 	Task
 	ContextName  *string `json:"contextName"`
 	ContextColor *string `json:"contextColor"`
+	ChildCount   int     `json:"childCount"`
 }
 
 type TaskFilter struct {
@@ -106,6 +108,7 @@ type TaskInput struct {
 	Horizon     string  `json:"horizon"`
 	Status      string  `json:"status"`
 	ContextID   *string `json:"contextId"`
+	ParentID    *string `json:"parentId"`
 	Priority    string  `json:"priority"`
 	StartDate   *string `json:"startDate"`
 	DueDate     *string `json:"dueDate"`
@@ -292,6 +295,7 @@ func (s *Store) migrate() error {
 			horizon TEXT NOT NULL DEFAULT 'short',
 			status TEXT NOT NULL DEFAULT 'todo',
 			context_id TEXT REFERENCES contexts(id) ON DELETE SET NULL,
+			parent_id TEXT,
 			priority TEXT NOT NULL DEFAULT 'medium',
 			start_date TEXT,
 			due_date TEXT,
@@ -342,6 +346,14 @@ func (s *Store) migrate() error {
 	}
 	if err := s.ensureColumn("tasks", "max_seconds", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
+	}
+	// subtasks: parent_id links a child to its parent (NULL = top-level).
+	// No hard FK so deletes can promote children instead of losing them.
+	if err := s.ensureColumn("tasks", "parent_id", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`); err != nil {
+		return fmt.Errorf("migrate: %w", err)
 	}
 	// goal columns on contexts (older DBs lack them; existing rows get zeros)
 	if err := s.ensureColumn("contexts", "daily_target", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -758,17 +770,21 @@ func boolToInt(b bool) int {
 
 func scanTaskDetail(rows *sql.Rows) (TaskDetail, error) {
 	var t TaskDetail
-	var ctxID sql.NullString
+	var ctxID, parentID sql.NullString
 	var start, due, completed, tstarted sql.NullString
 	var ctxName, ctxColor sql.NullString
 	var focus int
-	err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor)
+	err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &parentID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor, &t.ChildCount)
 	if err != nil {
 		return t, err
 	}
 	if ctxID.Valid {
 		v := ctxID.String
 		t.ContextID = &v
+	}
+	if parentID.Valid && strings.TrimSpace(parentID.String) != "" {
+		v := parentID.String
+		t.ParentID = &v
 	}
 	if start.Valid {
 		v := start.String
@@ -798,7 +814,7 @@ func scanTaskDetail(rows *sql.Rows) (TaskDetail, error) {
 	return t, nil
 }
 
-const taskDetailSelect = `SELECT t.id,t.title,t.description,t.horizon,t.status,t.context_id,t.priority,t.start_date,t.due_date,t.focus,t.sort_order,t.elapsed_seconds,t.timer_started_at,t.max_seconds,t.created_at,t.updated_at,t.completed_at,c.name,c.color
+const taskDetailSelect = `SELECT t.id,t.title,t.description,t.horizon,t.status,t.context_id,t.parent_id,t.priority,t.start_date,t.due_date,t.focus,t.sort_order,t.elapsed_seconds,t.timer_started_at,t.max_seconds,t.created_at,t.updated_at,t.completed_at,c.name,c.color,(SELECT COUNT(*) FROM tasks ch WHERE ch.parent_id=t.id)
 	FROM tasks t LEFT JOIN contexts c ON c.id=t.context_id`
 
 func (s *Store) ListTasks(f TaskFilter) ([]TaskDetail, error) {
@@ -848,17 +864,21 @@ func (s *Store) ListTasks(f TaskFilter) ([]TaskDetail, error) {
 func (s *Store) GetTask(id string) (TaskDetail, error) {
 	row := s.db.QueryRow(taskDetailSelect+` WHERE t.id=?`, id)
 	var t TaskDetail
-	var ctxID sql.NullString
+	var ctxID, parentID sql.NullString
 	var start, due, completed, tstarted sql.NullString
 	var ctxName, ctxColor sql.NullString
 	var focus int
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor)
+	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &parentID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor, &t.ChildCount)
 	if err != nil {
 		return t, err
 	}
 	if ctxID.Valid {
 		v := ctxID.String
 		t.ContextID = &v
+	}
+	if parentID.Valid && strings.TrimSpace(parentID.String) != "" {
+		v := parentID.String
+		t.ParentID = &v
 	}
 	if start.Valid {
 		v := start.String
@@ -916,8 +936,27 @@ func (s *Store) CreateTask(in TaskInput) (TaskDetail, error) {
 	} else {
 		ctxID = nil
 	}
+	// Subtask: validate parent, adopt its horizon so the tree stays on one tab.
+	var parentAny any
+	var parentID *string
+	if in.ParentID != nil && strings.TrimSpace(*in.ParentID) != "" {
+		pid := strings.TrimSpace(*in.ParentID)
+		p, err := s.GetTask(pid)
+		if err != nil {
+			return TaskDetail{}, fmt.Errorf("parent task not found")
+		}
+		horizon = p.Horizon
+		parentAny = pid
+		parentID = &pid
+	} else {
+		parentAny = nil
+	}
 	var maxOrder int
-	_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE horizon=? AND status=?`, horizon, status).Scan(&maxOrder)
+	if parentID != nil {
+		_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id=? AND horizon=? AND status=?`, *parentID, horizon, status).Scan(&maxOrder)
+	} else {
+		_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id IS NULL AND horizon=? AND status=?`, horizon, status).Scan(&maxOrder)
+	}
 	id := uuid.NewString()
 	now := nowStr()
 	var completed any
@@ -935,8 +974,8 @@ func (s *Store) CreateTask(in TaskInput) (TaskDetail, error) {
 	if maxSecs < 0 {
 		maxSecs = 0
 	}
-	_, err := s.db.Exec(`INSERT INTO tasks(id,title,description,horizon,status,context_id,priority,start_date,due_date,focus,sort_order,max_seconds,created_at,updated_at,completed_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, title, in.Description, horizon, status, ctxID, priority, startAny, dueAny, boolToInt(in.Focus), maxOrder+1, maxSecs, now, now, completed)
+	_, err := s.db.Exec(`INSERT INTO tasks(id,title,description,horizon,status,context_id,parent_id,priority,start_date,due_date,focus,sort_order,max_seconds,created_at,updated_at,completed_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, title, in.Description, horizon, status, ctxID, parentAny, priority, startAny, dueAny, boolToInt(in.Focus), maxOrder+1, maxSecs, now, now, completed)
 	if err != nil {
 		return TaskDetail{}, err
 	}
@@ -963,6 +1002,14 @@ func (s *Store) UpdateTask(id string, in TaskInput) (TaskDetail, error) {
 	prev, err := s.GetTask(id)
 	if err != nil {
 		return TaskDetail{}, fmt.Errorf("task not found")
+	}
+	// Parent is managed via SetTaskParent (avoids accidental un-nesting when
+	// the edit form omits parentId). Keep the existing link. If the task is a
+	// subtask, stay on the parent's horizon.
+	if prev.ParentID != nil && strings.TrimSpace(*prev.ParentID) != "" {
+		if p, pErr := s.GetTask(strings.TrimSpace(*prev.ParentID)); pErr == nil {
+			horizon = p.Horizon
+		}
 	}
 	var completed any
 	if status == "done" && prev.Status != "done" {
@@ -1000,8 +1047,17 @@ func (s *Store) MoveTask(id, status string) (TaskDetail, error) {
 	if status == "done" {
 		completed = now
 	}
+	// Keep the subtask link; place at the end of the sibling group.
+	cur, err := s.GetTask(id)
+	if err != nil {
+		return TaskDetail{}, fmt.Errorf("task not found")
+	}
 	var maxOrder int
-	_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE status=?`, status).Scan(&maxOrder)
+	if cur.ParentID != nil && strings.TrimSpace(*cur.ParentID) != "" {
+		_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id=? AND horizon=? AND status=? AND id<>?`, strings.TrimSpace(*cur.ParentID), cur.Horizon, status, id).Scan(&maxOrder)
+	} else {
+		_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id IS NULL AND horizon=? AND status=? AND id<>?`, cur.Horizon, status, id).Scan(&maxOrder)
+	}
 	if _, err := s.db.Exec(`UPDATE tasks SET status=?, sort_order=?, updated_at=?, completed_at=CASE WHEN ?='done' THEN ? ELSE NULL END WHERE id=?`, status, maxOrder+1, now, status, completed, id); err != nil {
 		return TaskDetail{}, err
 	}
@@ -1021,6 +1077,21 @@ func (s *Store) ToggleFocus(id string) (TaskDetail, error) {
 }
 
 func (s *Store) DeleteTask(id string) error {
+	cur, err := s.GetTask(id)
+	if err != nil {
+		return fmt.Errorf("task not found")
+	}
+	// Promote children to the deleted task's parent (top-level when the
+	// deleted task was top-level) so no subtask is lost.
+	var newParent any
+	if cur.ParentID != nil && strings.TrimSpace(*cur.ParentID) != "" {
+		newParent = strings.TrimSpace(*cur.ParentID)
+	} else {
+		newParent = nil
+	}
+	if _, err := s.db.Exec(`UPDATE tasks SET parent_id=?, updated_at=? WHERE parent_id=?`, newParent, nowStr(), id); err != nil {
+		return err
+	}
 	res, err := s.db.Exec(`DELETE FROM tasks WHERE id=?`, id)
 	if err != nil {
 		return err
@@ -1035,6 +1106,134 @@ func (s *Store) DeleteTask(id string) error {
 func (s *Store) ReorderTask(id string, newOrder int) error {
 	_, err := s.db.Exec(`UPDATE tasks SET sort_order=?, updated_at=? WHERE id=?`, newOrder, nowStr(), id)
 	return err
+}
+
+// ReorderTasks persists a manual drag order: ids[0] gets sort_order 0, etc.
+// Callers pass the sibling IDs in their new visual order (top-level or one
+// parent's children within one status column).
+func (s *Store) ReorderTasks(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := nowStr()
+	for i, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		if _, err := s.db.Exec(`UPDATE tasks SET sort_order=?, updated_at=? WHERE id=?`, i, now, strings.TrimSpace(id)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ancestors returns the parent chain of id, nearest first.
+func (s *Store) ancestors(id string) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{strings.TrimSpace(id): true}
+	cur := strings.TrimSpace(id)
+	for {
+		var parent sql.NullString
+		if err := s.db.QueryRow(`SELECT parent_id FROM tasks WHERE id=?`, cur).Scan(&parent); err != nil {
+			return out, err
+		}
+		if !parent.Valid || strings.TrimSpace(parent.String) == "" {
+			return out, nil
+		}
+		pid := strings.TrimSpace(parent.String)
+		if seen[pid] {
+			return out, fmt.Errorf("cyclic parent link")
+		}
+		seen[pid] = true
+		out = append(out, pid)
+		cur = pid
+	}
+}
+
+// descendants returns all (transitive) children of id.
+func (s *Store) descendants(id string) ([]string, error) {
+	out := []string{}
+	queue := []string{strings.TrimSpace(id)}
+	seen := map[string]bool{strings.TrimSpace(id): true}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		rows, err := s.db.Query(`SELECT id FROM tasks WHERE parent_id=?`, cur)
+		if err != nil {
+			return out, err
+		}
+		var kids []string
+		for rows.Next() {
+			var kid string
+			if err := rows.Scan(&kid); err != nil {
+				rows.Close()
+				return out, err
+			}
+			kids = append(kids, kid)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return out, err
+		}
+		for _, k := range kids {
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			out = append(out, k)
+			queue = append(queue, k)
+		}
+	}
+	return out, nil
+}
+
+// SetTaskParent nests id inside parentID (nil/empty = top-level). It adopts
+// the parent horizon, guards cycles, and appends at the end of the new
+// sibling group. Setting a task's parent to itself or its own descendant
+// is refused.
+func (s *Store) SetTaskParent(id string, parentID *string) (TaskDetail, error) {
+	cur, err := s.GetTask(id)
+	if err != nil {
+		return TaskDetail{}, fmt.Errorf("task not found")
+	}
+	var pid *string
+	if parentID != nil && strings.TrimSpace(*parentID) != "" {
+		v := strings.TrimSpace(*parentID)
+		pid = &v
+	}
+	if pid != nil {
+		if *pid == cur.ID {
+			return TaskDetail{}, fmt.Errorf("a task cannot be its own parent")
+		}
+		p, err := s.GetTask(*pid)
+		if err != nil {
+			return TaskDetail{}, fmt.Errorf("parent task not found")
+		}
+		kids, err := s.descendants(cur.ID)
+		if err != nil {
+			return TaskDetail{}, err
+		}
+		for _, k := range kids {
+			if k == *pid {
+				return TaskDetail{}, fmt.Errorf("cannot nest a task inside its own subtask")
+			}
+		}
+		// Adopt the parent horizon so the whole tree lives on one tab.
+		var maxOrder int
+		_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id=? AND id<>?`, *pid, cur.ID).Scan(&maxOrder)
+		var parentAny any = *pid
+		if _, err := s.db.Exec(`UPDATE tasks SET parent_id=?, horizon=?, sort_order=?, updated_at=? WHERE id=?`, parentAny, p.Horizon, maxOrder+1, nowStr(), cur.ID); err != nil {
+			return TaskDetail{}, err
+		}
+		return s.GetTask(cur.ID)
+	}
+	// Un-nest to top-level, appended at the end of its status group.
+	var maxOrder int
+	_ = s.db.QueryRow(`SELECT COALESCE(MAX(sort_order),0) FROM tasks WHERE parent_id IS NULL AND horizon=? AND status=? AND id<>?`, cur.Horizon, cur.Status, cur.ID).Scan(&maxOrder)
+	if _, err := s.db.Exec(`UPDATE tasks SET parent_id=NULL, sort_order=?, updated_at=? WHERE id=?`, maxOrder+1, nowStr(), cur.ID); err != nil {
+		return TaskDetail{}, err
+	}
+	return s.GetTask(cur.ID)
 }
 
 func (s *Store) GetStats() (Stats, error) {
@@ -1135,21 +1334,78 @@ func (s *Store) runningTaskLocked(except string) (string, error) {
 	return "", rows.Err()
 }
 
-// StartTimer starts tracking on a task; auto-pauses any other running timer.
+// runningTaskIDs returns all task timers currently running.
+func (s *Store) runningTaskIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM tasks WHERE timer_started_at IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// StartTimer starts tracking on a task; starting a subtask also starts its
+// parent chain (both clocks run in parallel). Unrelated running tasks are
+// auto-paused; ancestors/descendants/siblings-in-the-same-tree keep running
+// except that switching between siblings pauses the previous sibling.
 func (s *Store) StartTimer(id string) (TaskDetail, error) {
-	if _, err := s.GetTask(id); err != nil {
+	cur, err := s.GetTask(id)
+	if err != nil {
 		return TaskDetail{}, fmt.Errorf("task not found")
 	}
+	_ = cur
 	now := time.Now().UTC()
-	if other, err := s.runningTaskLocked(id); err != nil {
+	anc, err := s.ancestors(id)
+	if err != nil {
 		return TaskDetail{}, err
-	} else if other != "" {
-		if _, err := s.stopLocked(other, now); err != nil {
+	}
+	desc, err := s.descendants(id)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	keep := map[string]bool{id: true}
+	for _, a := range anc {
+		keep[a] = true
+	}
+	for _, d := range desc {
+		keep[d] = true
+	}
+	running, err := s.runningTaskIDs()
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	for _, r := range running {
+		if keep[r] {
+			continue
+		}
+		// Sibling switch: a running task in the same tree that is neither an
+		// ancestor nor a descendant gets paused (only one branch at a time),
+		// while the shared parents keep running.
+		if _, err := s.stopLocked(r, now); err != nil {
 			return TaskDetail{}, err
 		}
 	}
-	if _, err := s.db.Exec(`UPDATE tasks SET timer_started_at=?, updated_at=? WHERE id=?`, now.Format(time.RFC3339), nowStr(), id); err != nil {
-		return TaskDetail{}, err
+	// Start the task plus any ancestor not already running (parent inherits).
+	toStart := append([]string{id}, anc...)
+	for _, tid := range toStart {
+		var tstarted sql.NullString
+		if err := s.db.QueryRow(`SELECT timer_started_at FROM tasks WHERE id=?`, tid).Scan(&tstarted); err != nil {
+			return TaskDetail{}, err
+		}
+		if tstarted.Valid && strings.TrimSpace(tstarted.String) != "" {
+			continue
+		}
+		if _, err := s.db.Exec(`UPDATE tasks SET timer_started_at=?, updated_at=? WHERE id=?`, now.Format(time.RFC3339), nowStr(), tid); err != nil {
+			return TaskDetail{}, err
+		}
 	}
 	return s.GetTask(id)
 }
@@ -1267,35 +1523,48 @@ func (s *Store) checkpointContexts() error {
 }
 
 // FinishTask stops the timer (saving time) and marks the task done.
+// It also stops any running subtask timers so the subtree never keeps
+// ticking under a completed parent.
 func (s *Store) FinishTask(id string) (TaskDetail, error) {
 	if _, err := s.GetTask(id); err != nil {
 		return TaskDetail{}, fmt.Errorf("task not found")
 	}
-	if _, err := s.stopLocked(id, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	if kids, err := s.descendants(id); err == nil {
+		for _, k := range kids {
+			_, _ = s.stopLocked(k, now)
+		}
+	}
+	if _, err := s.stopLocked(id, now); err != nil {
 		return TaskDetail{}, err
 	}
-	now := nowStr()
-	if _, err := s.db.Exec(`UPDATE tasks SET status='done', completed_at=?, updated_at=? WHERE id=?`, now, now, id); err != nil {
+	nowStrVal := nowStr()
+	if _, err := s.db.Exec(`UPDATE tasks SET status='done', completed_at=?, updated_at=? WHERE id=?`, nowStrVal, nowStrVal, id); err != nil {
 		return TaskDetail{}, err
 	}
 	return s.GetTask(id)
 }
 
-// GetActiveTimer returns the currently running task, or sql.ErrNoRows.
+// GetActiveTimer returns the most recently started running task
+// (the subtask when a parent+child pair runs together), or sql.ErrNoRows.
 func (s *Store) GetActiveTimer() (TaskDetail, error) {
-	row := s.db.QueryRow(taskDetailSelect+` WHERE t.timer_started_at IS NOT NULL LIMIT 1`)
+	row := s.db.QueryRow(taskDetailSelect+` WHERE t.timer_started_at IS NOT NULL ORDER BY t.timer_started_at DESC LIMIT 1`)
 	var t TaskDetail
-	var ctxID sql.NullString
+	var ctxID, parentID sql.NullString
 	var start, due, completed, tstarted sql.NullString
 	var ctxName, ctxColor sql.NullString
 	var focus int
-	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor)
+	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Horizon, &t.Status, &ctxID, &parentID, &t.Priority, &start, &due, &focus, &t.SortOrder, &t.ElapsedSecs, &tstarted, &t.MaxSeconds, &t.CreatedAt, &t.UpdatedAt, &completed, &ctxName, &ctxColor, &t.ChildCount)
 	if err != nil {
 		return t, err
 	}
 	if ctxID.Valid {
 		v := ctxID.String
 		t.ContextID = &v
+	}
+	if parentID.Valid && strings.TrimSpace(parentID.String) != "" {
+		v := parentID.String
+		t.ParentID = &v
 	}
 	if start.Valid {
 		v := start.String
@@ -1323,6 +1592,25 @@ func (s *Store) GetActiveTimer() (TaskDetail, error) {
 	}
 	t.Focus = focus == 1
 	return t, nil
+}
+
+// GetActiveTimers returns every running task timer (parent+subtask pairs run
+// in parallel), most-recent first.
+func (s *Store) GetActiveTimers() ([]TaskDetail, error) {
+	rows, err := s.db.Query(taskDetailSelect + ` WHERE t.timer_started_at IS NOT NULL ORDER BY t.timer_started_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TaskDetail{}
+	for rows.Next() {
+		t, err := scanTaskDetail(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListTimeEntries(taskID string) ([]TimeEntry, error) {

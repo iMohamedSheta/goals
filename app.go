@@ -211,6 +211,18 @@ func (a *App) MoveTask(id string, status string) (store.TaskDetail, error) {
 	return a.store.MoveTask(id, status)
 }
 
+func (a *App) SetTaskParent(id string, parentID string) (store.TaskDetail, error) {
+	var pid *string
+	if parentID != "" {
+		pid = &parentID
+	}
+	return a.store.SetTaskParent(id, pid)
+}
+
+func (a *App) ReorderTasks(ids []string) error {
+	return a.store.ReorderTasks(ids)
+}
+
 func (a *App) ToggleFocus(id string) (store.TaskDetail, error) {
 	return a.store.ToggleFocus(id)
 }
@@ -258,6 +270,17 @@ func (a *App) FinishTask(id string) (store.TaskDetail, error) {
 
 func (a *App) GetActiveTimer() (store.TaskDetail, error) {
 	return a.store.GetActiveTimer()
+}
+
+func (a *App) GetActiveTimers() ([]store.TaskDetail, error) {
+	timers, err := a.store.GetActiveTimers()
+	if err != nil {
+		return nil, err
+	}
+	if timers == nil {
+		timers = []store.TaskDetail{}
+	}
+	return timers, nil
 }
 
 func (a *App) ListTimeEntries(taskID string) ([]store.TimeEntry, error) {
@@ -477,12 +500,20 @@ func (a *App) ensureTick() {
 
 // tickOnce returns false when no timer is running (loop should stop).
 // Task and context-goal timers are independent and may both run at once.
+// Parent+subtask task timers also run in parallel.
 func (a *App) tickOnce(n int) bool {
 	if a.store == nil {
 		return false
 	}
-	active, taskErr := a.store.GetActiveTimer()
+	actives, _ := a.store.GetActiveTimers()
 	cactive, ctxErr := a.store.GetActiveContextTimer("")
+	taskErr := error(nil)
+	var active store.TaskDetail
+	if len(actives) == 0 {
+		taskErr = fmt.Errorf("no active task timer")
+	} else {
+		active = actives[0]
+	}
 	if taskErr != nil && ctxErr != nil {
 		runtime.WindowSetTitle(a.ctx, "Goals")
 		tray.SetTooltip("Goals")
@@ -496,15 +527,23 @@ func (a *App) tickOnce(n int) bool {
 	if taskErr == nil {
 		elapsed, _, _ := a.store.Elapsed(active.ID)
 		title = fmt.Sprintf("\u23F1 %s \u00B7 %s", formatHMS(elapsed), active.Title)
-		if active.MaxSeconds > 0 && elapsed >= active.MaxSeconds {
-			over = true
-			a.notifyOvertimeOnce(active.ID, active.Title, elapsed, active.MaxSeconds)
+		if len(actives) > 1 {
+			title = fmt.Sprintf("\u23F1 %s \u00B7 %s (+%d)", formatHMS(elapsed), active.Title, len(actives)-1)
+		}
+		for _, t := range actives {
+			el, _, _ := a.store.Elapsed(t.ID)
+			if t.MaxSeconds > 0 && el >= t.MaxSeconds {
+				over = true
+				a.notifyOvertimeOnce(t.ID, t.Title, el, t.MaxSeconds)
+			}
 		}
 		runtime.EventsEmit(a.ctx, "timer:tick", map[string]any{
 			"taskId":  active.ID,
 			"title":   active.Title,
 			"elapsed": elapsed,
+			"count":   len(actives),
 		})
+		runtime.EventsEmit(a.ctx, "timers:tick", actives)
 	} else {
 		runtime.EventsEmit(a.ctx, "timer:tick", nil)
 	}

@@ -49,6 +49,8 @@ export function GetActiveContextTimer(arg1:string):Promise<store.Context>;
 
 export function GetActiveTimer():Promise<store.TaskDetail>;
 
+export function GetActiveTimers():Promise<Array<store.TaskDetail>>;
+
 export function GetContext(arg1:string,arg2:string):Promise<store.Context>;
 
 export function GetContextToday(arg1:string,arg2:string):Promise<number>;
@@ -93,6 +95,8 @@ export function PollDriveAuth():Promise<drive.DevicePoll>;
 
 export function QuitApp():Promise<void>;
 
+export function ReorderTasks(arg1:Array<string>):Promise<void>;
+
 export function ReportError(arg1:string):Promise<void>;
 
 export function RestoreDriveBackup(arg1:string):Promise<void>;
@@ -102,6 +106,8 @@ export function SaveDriveCredentials(arg1:string,arg2:string):Promise<void>;
 export function SetAIModel(arg1:string):Promise<void>;
 
 export function SetSetting(arg1:string,arg2:string):Promise<void>;
+
+export function SetTaskParent(arg1:string,arg2:string):Promise<store.TaskDetail>;
 
 export function StartContextTimer(arg1:string):Promise<store.Context>;
 

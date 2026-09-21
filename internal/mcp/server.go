@@ -63,7 +63,7 @@ func tools() []toolDef {
 		{Name: "get_task", Description: "Get a single task by id.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "create_task", Description: "Create a goal task. horizon short(~week)/medium(~month)/long(~3mo). status todo|in_progress|done|blocked.", InputSchema: obj(map[string]any{
 			"title": str("task title (required)"), "description": str("details"), "horizon": str("short|medium|long"),
-			"status": str("todo|in_progress|done|blocked"), "contextId": str("context id (Work/Life/...)"),
+			"status": str("todo|in_progress|done|blocked"), "contextId": str("context id (Work/Life/...)"), "parentId": str("parent task id for subtasks"),
 			"priority": str("low|medium|high|urgent"), "startDate": str("YYYY-MM-DD"), "dueDate": str("YYYY-MM-DD (defaults from horizon)"), "focus": boolean("pin to focus list"),
 			"maxSeconds": map[string]any{"type": "integer", "description": "max expected time in seconds (overtime alert)"},
 		}, []string{"title"})},
@@ -76,6 +76,8 @@ func tools() []toolDef {
 		{Name: "move_task", Description: "Move a task to another kanban column.", InputSchema: obj(map[string]any{"id": str("task id"), "status": str("todo|in_progress|done|blocked")}, []string{"id", "status"})},
 		{Name: "toggle_focus", Description: "Toggle a task's focus pin.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "delete_task", Description: "Delete a task.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
+		{Name: "set_parent", Description: "Nest a task inside a parent (subtask) via drag or id. Empty parentId un-nests to top-level. Starting a subtask timer also starts its parent.", InputSchema: obj(map[string]any{"id": str("task id"), "parentId": str("parent task id (empty = top-level)")}, []string{"id"})},
+		{Name: "reorder_tasks", Description: "Persist manual drag order: ids in their new visual order (siblings within one column).", InputSchema: obj(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "task ids in order"}}, []string{"ids"})},
 		{Name: "list_contexts", Description: "List contexts (Work, Life, ...). Each context is a goal: daily target, own timer, today's progress. day=YYYY-MM-DD for daily progress (default today).", InputSchema: obj(map[string]any{"day": str("YYYY-MM-DD (default today)")}, []string{})},
 		{Name: "create_context", Description: "Create a context (e.g. Work, Life).", InputSchema: obj(map[string]any{"name": str("name"), "color": str("hex color")}, []string{"name"})},
 		{Name: "update_context", Description: "Rename/recolor a context and set its goal: recurrence daily|weekly, dailyTargetSeconds=target per period e.g. 18000 for 5h/day, maxSeconds lifetime estimate, description(s).", InputSchema: obj(map[string]any{
@@ -94,7 +96,7 @@ func tools() []toolDef {
 		{Name: "delete_horizon", Description: "Delete a planning tab (refused when it still has tasks).", InputSchema: obj(map[string]any{"key": str("horizon key")}, []string{"key"})},
 		{Name: "focus_list", Description: "List only focused tasks (your current focus).", InputSchema: obj(map[string]any{"horizon": str("short|medium|long|all")}, []string{})},
 		{Name: "stats", Description: "Counts by horizon/status, total, focused, done.", InputSchema: obj(map[string]any{}, []string{})},
-		{Name: "start_timer", Description: "Start the time tracker on a task (auto-pauses any other running timer). Keeps running even if the app window is closed.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
+		{Name: "start_timer", Description: "Start the time tracker on a task (auto-pauses unrelated timers; starting a subtask also starts its parent). Keeps running even if the app window is closed.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "stop_timer", Description: "Pause the time tracker on a task and save the segment.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "finish_task", Description: "Stop the timer (saving tracked time) and mark the task done, recording completion time.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "active_timer", Description: "Show the currently running timer, if any.", InputSchema: obj(map[string]any{}, []string{})},
@@ -245,7 +247,7 @@ func Run(dbPath string) int {
 					result = textResult(t)
 				}
 			case "create_task":
-				in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
+				in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), ParentID: strPtr(getStr("parentId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
 				t, err := s.CreateTask(in)
 				if err != nil {
 					result = errResult(err)
@@ -280,6 +282,27 @@ func Run(dbPath string) int {
 					result = errResult(err)
 				} else {
 					result = textResult(map[string]any{"deleted": getStr("id")})
+				}
+			case "set_parent":
+				t, err := s.SetTaskParent(getStr("id"), strPtr(getStr("parentId")))
+				if err != nil {
+					result = errResult(err)
+				} else {
+					result = textResult(t)
+				}
+			case "reorder_tasks":
+				var ids []string
+				if v, ok := args["ids"].([]any); ok {
+					for _, x := range v {
+						if str, ok := x.(string); ok {
+							ids = append(ids, str)
+						}
+					}
+				}
+				if err := s.ReorderTasks(ids); err != nil {
+					result = errResult(err)
+				} else {
+					result = textResult(map[string]any{"reordered": len(ids)})
 				}
 		case "list_contexts":
 			cs, err := s.ListContexts(getStr("day"))
@@ -428,12 +451,12 @@ func Run(dbPath string) int {
 					result = textResult(t)
 				}
 			case "active_timer":
-				t, err := s.GetActiveTimer()
-				if err != nil {
+				all, _ := s.GetActiveTimers()
+				if len(all) == 0 {
 					result = textResult(map[string]any{"running": false})
 				} else {
-					elapsed, _, _ := s.Elapsed(t.ID)
-					result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "task": t})
+					elapsed, _, _ := s.Elapsed(all[0].ID)
+					result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "task": all[0], "timers": all})
 				}
 			case "task_time":
 				id := getStr("id")

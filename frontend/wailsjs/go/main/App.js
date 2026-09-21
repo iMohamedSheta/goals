@@ -90,6 +90,10 @@ export function GetActiveTimer() {
   return window['go']['main']['App']['GetActiveTimer']();
 }
 
+export function GetActiveTimers() {
+  return window['go']['main']['App']['GetActiveTimers']();
+}
+
 export function GetContext(arg1, arg2) {
   return window['go']['main']['App']['GetContext'](arg1, arg2);
 }
@@ -178,6 +182,10 @@ export function QuitApp() {
   return window['go']['main']['App']['QuitApp']();
 }
 
+export function ReorderTasks(arg1) {
+  return window['go']['main']['App']['ReorderTasks'](arg1);
+}
+
 export function ReportError(arg1) {
   return window['go']['main']['App']['ReportError'](arg1);
 }
@@ -196,6 +204,10 @@ export function SetAIModel(arg1) {
 
 export function SetSetting(arg1, arg2) {
   return window['go']['main']['App']['SetSetting'](arg1, arg2);
+}
+
+export function SetTaskParent(arg1, arg2) {
+  return window['go']['main']['App']['SetTaskParent'](arg1, arg2);
 }
 
 export function StartContextTimer(arg1) {

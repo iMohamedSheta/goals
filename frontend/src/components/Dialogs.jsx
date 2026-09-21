@@ -25,9 +25,30 @@ function Field({ label, children }) {
   );
 }
 
-export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHorizon, presetStatus, onSave, entries }) {
+export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHorizon, presetStatus, presetParentId, tasks: allTasks, onSave, entries }) {
   const hz = horizons.find((h) => h.key === (task?.horizon || activeHorizon));
   const [form, setForm] = React.useState(null);
+
+  // Possible parents: same-horizon tasks excluding self + descendants (cycle guard).
+  const parentOptions = React.useMemo(() => {
+    const list = allTasks || [];
+    if (!open) return [];
+    const horizonKey = form?.horizon || task?.horizon || activeHorizon || 'short';
+    const banned = new Set(task ? [task.id] : []);
+    if (task) {
+      const stack = (list.filter((x) => x.parentId === task.id) || []).map((x) => x.id);
+      while (stack.length) {
+        const cur = stack.pop();
+        if (banned.has(cur)) continue;
+        banned.add(cur);
+        for (const kid of list.filter((x) => x.parentId === cur)) stack.push(kid.id);
+      }
+    }
+    return list
+      .filter((x) => (!task || x.id !== task.id) && !banned.has(x.id))
+      .filter((x) => (x.horizon || activeHorizon) === horizonKey || (!task && x.horizon === (form?.horizon || activeHorizon)))
+      .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  }, [open, allTasks, task, form?.horizon, activeHorizon]); // eslint-disable-line
 
   React.useEffect(() => {
     if (!open) return;
@@ -37,6 +58,7 @@ export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHo
       horizon: task?.horizon || activeHorizon || 'short',
       status: task?.status || presetStatus || 'todo',
       contextId: task?.contextId || '',
+      parentId: task?.parentId || presetParentId || '',
       priority: task?.priority || 'medium',
       startDate: task?.startDate || todayISO(),
       dueDate: task?.dueDate || plusDaysISO(hz?.defaultDays || 7),
@@ -82,6 +104,25 @@ export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHo
             <Select value={form.contextId} onChange={(e) => set('contextId', e.target.value)}>
               <option value="">{t.none}</option>
               {contexts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+          <Field label={t.parentTask || 'Parent task'}>
+            <Select
+              value={form.parentId}
+              onChange={(e) => {
+                const pid = e.target.value;
+                if (pid) {
+                  const p = (allTasks || []).find((x) => x.id === pid);
+                  if (p?.horizon) {
+                    setForm((f) => ({ ...f, parentId: pid, horizon: p.horizon }));
+                    return;
+                  }
+                }
+                set('parentId', pid);
+              }}
+            >
+              <option value="">{t.topLevel || '— Top level —'}</option>
+              {parentOptions.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
             </Select>
           </Field>
           <Field label={t.priority}>
@@ -157,6 +198,7 @@ export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHo
             horizon: form.horizon,
             status: form.status,
             contextId: form.contextId || null,
+            parentId: form.parentId || null,
             priority: form.priority,
             startDate: form.startDate || null,
             dueDate: form.dueDate || null,

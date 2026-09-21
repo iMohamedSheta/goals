@@ -239,6 +239,7 @@ export namespace store {
 	    horizon: string;
 	    status: string;
 	    contextId?: string;
+	    parentId?: string;
 	    priority: string;
 	    startDate?: string;
 	    dueDate?: string;
@@ -252,6 +253,7 @@ export namespace store {
 	    completedAt?: string;
 	    contextName?: string;
 	    contextColor?: string;
+	    childCount: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TaskDetail(source);
@@ -265,6 +267,7 @@ export namespace store {
 	        this.horizon = source["horizon"];
 	        this.status = source["status"];
 	        this.contextId = source["contextId"];
+	        this.parentId = source["parentId"];
 	        this.priority = source["priority"];
 	        this.startDate = source["startDate"];
 	        this.dueDate = source["dueDate"];
@@ -278,6 +281,7 @@ export namespace store {
 	        this.completedAt = source["completedAt"];
 	        this.contextName = source["contextName"];
 	        this.contextColor = source["contextColor"];
+	        this.childCount = source["childCount"];
 	    }
 	}
 	export class TaskFilter {
@@ -306,6 +310,7 @@ export namespace store {
 	    horizon: string;
 	    status: string;
 	    contextId?: string;
+	    parentId?: string;
 	    priority: string;
 	    startDate?: string;
 	    dueDate?: string;
@@ -323,6 +328,7 @@ export namespace store {
 	        this.horizon = source["horizon"];
 	        this.status = source["status"];
 	        this.contextId = source["contextId"];
+	        this.parentId = source["parentId"];
 	        this.priority = source["priority"];
 	        this.startDate = source["startDate"];
 	        this.dueDate = source["dueDate"];
