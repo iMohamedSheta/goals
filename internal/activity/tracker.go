@@ -1,3 +1,6 @@
+// Package activity tracks the foreground app/window over time, classifies
+// usage (work/distraction/other/idle) and fires distraction alerts.
+// Tracking is opt-in (default OFF).
 package activity
 
 import (

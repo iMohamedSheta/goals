@@ -12,7 +12,8 @@ type City struct {
 	TZ      string  `json:"tz"`
 }
 
-// Cities: Egypt first (user's home), then the wider world.
+// Cities lists the built-in selectable locations, Egypt first (user's home),
+// then the wider world.
 var Cities = []City{
 	// ---------- Egypt (Africa/Cairo) ----------
 	{ID: "cairo", Name: "Cairo", NameAr: "القاهرة", Country: "Egypt", Lat: 30.0444, Lng: 31.2357, TZ: "Africa/Cairo"},

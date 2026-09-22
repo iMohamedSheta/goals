@@ -33,7 +33,8 @@ type Settings struct {
 	Clock12h  bool    `json:"clock12h"`
 }
 
-// DefaultSettings: alerts off, Egyptian method, Cairo, 12h clock.
+// DefaultSettings returns the default configuration: alerts off, Egyptian
+// method, Cairo, 12h clock.
 func DefaultSettings() Settings {
 	c := FindCity("cairo")
 	return Settings{Enabled: false, Method: "egypt", AsrHanafi: false, City: "cairo", Lat: c.Lat, Lng: c.Lng, TZ: c.TZ, Clock12h: true}
@@ -338,7 +339,7 @@ func (r *Reminder) Going() {
 	r.snoozeAt = time.Time{}
 }
 
-// Status describes today + the next upcoming prayer (for the sidebar pill).
+// PrayerStatus describes today + the next upcoming prayer (for the sidebar pill).
 type PrayerStatus struct {
 	Enabled  bool              `json:"enabled"`
 	City     string            `json:"city"`
