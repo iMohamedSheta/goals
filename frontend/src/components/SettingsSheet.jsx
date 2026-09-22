@@ -3,14 +3,16 @@ import {
   Moon, Sun, Monitor, Palette, Type, Square, Layers, Box,
   Sparkles, Maximize2, RotateCcw, Plus, Trash2, CalendarRange, Users,
   Database, Cloud, Copy, Check, FolderOpen, Upload, Download, Bot, Power,
+  Globe, Activity, BarChart3, Languages, Sunrise, MapPin, BellRing,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Sheet, SheetHeader, SheetBody, SheetFooter } from './ui/sheet';
 import { Input, Label, Select } from './ui/form';
 import { ACCENTS, FONTS, surfClass, density, motionClass, RADIUS } from '../lib/appearance';
-import { horizonName, formatHMS } from '../lib/i18n';
+import { horizonName, formatHMS, formatClock } from '../lib/i18n';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
+import { ListPrayerCities, GetPrayerTimesFor } from '../../wailsjs/go/main/App';
 
 function Seg({ options, value, onPick }) {
   return (
@@ -196,6 +198,347 @@ function AppearanceTab({ t, value, dirty, onChange, onReset }) {
             <Switch on={value.cardDesc === 'on'} onToggle={() => onChange({ cardDesc: value.cardDesc === 'on' ? 'off' : 'on' })} />
           </div>
         </div>
+      </Section>
+    </div>
+  );
+}
+
+/* ---------------- general tab (language + OS startup) ---------------- */
+
+function GeneralTab({ t, lang, onLangChange, autostartOn, autostartBusy, autostartErr, onAutostartToggle }) {
+  return (
+    <div className="space-y-3">
+      <Section icon={Languages} title={t.languageLabel}>
+        <p className="mb-2.5 text-xs leading-relaxed text-muted-foreground">{t.languageDesc}</p>
+        <div className="inline-flex flex-wrap gap-1 rounded-xl bg-muted p-1">
+          {[
+            { value: 'ar', label: t.langArabic },
+            { value: 'en', label: t.langEnglish },
+          ].map((o) => (
+            <button
+              key={o.value}
+              onClick={() => onLangChange(o.value)}
+              className={cn(
+                'rounded-lg px-4 py-1.5 text-xs font-bold transition-all',
+                lang === o.value ? 'border bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section icon={Power} title={t.autostartLabel}>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs leading-relaxed text-muted-foreground">{t.autostartDesc}</p>
+          <Switch on={!!autostartOn} onToggle={onAutostartToggle} />
+        </div>
+        {autostartBusy && <p className="mt-2 text-xs text-muted-foreground">…</p>}
+        {autostartErr && <p className="mt-2 text-xs text-red-400" dir="ltr">{autostartErr}</p>}
+      </Section>
+    </div>
+  );
+}
+
+/* ---------------- activity tab (opt-in usage tracking) ---------------- */
+
+function ActivityTab({ t, enabled, busy, onToggleEnabled, alertsOn, onToggleAlerts, dailyMin, sessionMin, onSaveThresholds, live, onOpenInsights, onClear, clearMsg, retentionDays, onSaveRetention, stats, onPruneNow, pruneMsg }) {
+  const [daily, setDaily] = React.useState(dailyMin ?? 30);
+  const [session, setSession] = React.useState(sessionMin ?? 10);
+  const [saved, setSaved] = React.useState(false);
+  const [keep, setKeep] = React.useState(retentionDays ?? 90);
+  const [keepSaved, setKeepSaved] = React.useState(false);
+  React.useEffect(() => { setDaily(dailyMin ?? 30); }, [dailyMin]);
+  React.useEffect(() => { setSession(sessionMin ?? 10); }, [sessionMin]);
+  React.useEffect(() => { setKeep(retentionDays ?? 90); }, [retentionDays]);
+
+  const save = async () => {
+    setSaved(false);
+    await onSaveThresholds?.(Math.max(0, +daily || 0), Math.max(0, +session || 0));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const saveKeep = async () => {
+    setKeepSaved(false);
+    await onSaveRetention?.(Math.max(0, Math.min(3650, +keep || 0)));
+    setKeepSaved(true);
+    setTimeout(() => setKeepSaved(false), 1500);
+  };
+
+  const fmtBytes = (n) => {
+    n = n || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  };
+
+  return (
+    <div className="space-y-3">
+      <Section icon={Activity} title={t.activityTitle}>
+        <p className="mb-2.5 text-xs leading-relaxed text-muted-foreground">{t.activityDesc}</p>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-2.5">
+          <div>
+            <p className="text-[13px] font-bold">{t.activityEnabledLabel}</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t.activityEnabledDesc}</p>
+          </div>
+          <Switch on={!!enabled} onToggle={onToggleEnabled} />
+        </div>
+        {busy && <p className="mt-2 text-xs text-muted-foreground">…</p>}
+        {live?.enabled && live?.app ? (
+          <p className="tabular mt-2 text-[11px] text-muted-foreground">
+            {t.liveNow}: <span className="font-bold text-foreground">{live.detail || live.title || live.app}</span>
+            {' · '}{live.app}{live.domain ? ` · ${live.domain}` : ''}
+          </p>
+        ) : null}
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{t.activityPrivacy}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t.activityHow}</p>
+      </Section>
+
+      <Section icon={BarChart3} title={t.insights}>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={onOpenInsights}>
+            <BarChart3 /> {t.openInsights}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onClear}>
+            <Trash2 /> {t.clearActivity}
+          </Button>
+        </div>
+        {clearMsg && <p className="mt-2 text-xs text-muted-foreground">{clearMsg}</p>}
+      </Section>
+
+      <Section icon={Database} title={t.dbSize}>
+        <p className="tabular text-xs text-muted-foreground">
+          {(stats?.segments ?? 0)} {t.sessionsLabel} · {fmtBytes(stats?.dbBytes)} {stats?.oldest ? `· ${t.storedSince(stats.oldest)}` : ''}
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t.retentionDesc}</p>
+        <div className="mt-2.5 flex items-end gap-2">
+          <div className="w-36">
+            <Field label={t.retentionLabel}>
+              <Input type="number" min={0} max={3650} value={keep} onChange={(e) => setKeep(e.target.value)} className="tabular text-center" />
+            </Field>
+          </div>
+          <Button size="sm" onClick={saveKeep}>
+            {keepSaved ? <Check /> : null} {keepSaved ? t.copied : t.saveChanges}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onPruneNow}>
+            <Trash2 /> {t.pruneNow}
+          </Button>
+        </div>
+        {pruneMsg && <p className="mt-2 text-xs text-muted-foreground">{pruneMsg}</p>}
+      </Section>
+
+      <Section icon={Power} title={t.activityAlertsLabel}>
+        <div className="mb-2.5 flex items-center justify-between gap-3">
+          <p className="text-xs leading-relaxed text-muted-foreground">{t.activityAlertsDesc}</p>
+          <Switch on={!!alertsOn} onToggle={onToggleAlerts} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t.activityDailyLabel}>
+            <Input type="number" min={0} max={1440} value={daily} onChange={(e) => setDaily(e.target.value)} className="tabular text-center" />
+          </Field>
+          <Field label={t.activitySessionLabel}>
+            <Input type="number" min={0} max={480} value={session} onChange={(e) => setSession(e.target.value)} className="tabular text-center" />
+          </Field>
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">{t.activityThresholdHint}</p>
+        <Button size="sm" className="mt-2.5" onClick={save}>
+          {saved ? <Check /> : null} {saved ? t.copied : t.saveChanges}
+        </Button>
+      </Section>
+    </div>
+  );
+}
+
+/* ---------------- prayer tab ---------------- */
+
+const PRAYER_METHODS = [
+  { value: 'egypt', labelKey: 'methodEgypt' },
+  { value: 'mwl', labelKey: 'methodMwl' },
+  { value: 'isna', labelKey: 'methodIsna' },
+  { value: 'makkah', labelKey: 'methodMakkah' },
+  { value: 'karachi', labelKey: 'methodKarachi' },
+  { value: 'gulf', labelKey: 'methodGulf' },
+  { value: 'jafari', labelKey: 'methodJafari' },
+];
+
+const PRAYER_KEYS = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
+
+function PrayerTab({ t, lang, initial, onToggleEnabled, onSave, savedFlash }) {
+  const [cities, setCities] = React.useState([]);
+  const [custom, setCustom] = React.useState(initial?.city === 'custom');
+  const [draft, setDraft] = React.useState(() => ({ clock12h: true, ...(initial || {}) }));
+  const [times, setTimes] = React.useState([]);
+
+  React.useEffect(() => {
+    ListPrayerCities().then((c) => setCities(c || [])).catch(() => {});
+  }, []);
+  React.useEffect(() => {
+    setDraft({ clock12h: true, ...(initial || {}) });
+    setCustom(initial?.city === 'custom');
+  }, [initial?.city, initial?.method, initial?.asrHanafi, initial?.lat, initial?.lng, initial?.tz, initial?.clock12h]); // eslint-disable-line
+
+  const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+  // countries in list order (Egypt first), then the places inside one country
+  const countries = React.useMemo(() => {
+    const seen = [];
+    for (const c of cities || []) {
+      if (c.country && !seen.includes(c.country)) seen.push(c.country);
+    }
+    return seen;
+  }, [cities]);
+  const cityOf = (id) => (cities || []).find((c) => c.id === id);
+  const draftCountry = cityOf(draft.city)?.country || countries[0] || 'Egypt';
+  const places = (cities || []).filter((c) => c.country === draftCountry);
+
+  const pickCountry = (country) => {
+    const first = (cities || []).find((c) => c.country === country);
+    if (first) {
+      set({ city: first.id, lat: first.lat, lng: first.lng, tz: first.tz });
+      setCustom(false);
+    }
+  };
+  const pickCity = (id) => {
+    const c = cityOf(id);
+    if (c) set({ city: c.id, lat: c.lat, lng: c.lng, tz: c.tz });
+  };
+
+  // live preview for the current draft (unsaved) location+method
+  React.useEffect(() => {
+    const lat = +draft.lat, lng = +draft.lng;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) { setTimes([]); return; }
+    const id = setTimeout(() => {
+      GetPrayerTimesFor(lat, lng, draft.tz || 'Africa/Cairo', draft.method || 'egypt', !!draft.asrHanafi, '')
+        .then((rows) => setTimes(rows || [])).catch(() => {});
+    }, 300);
+    return () => clearTimeout(id);
+  }, [draft.lat, draft.lng, draft.tz, draft.method, draft.asrHanafi]);
+
+  return (
+    <div className="space-y-3">
+      <Section icon={BellRing} title={t.prayerTitle}>
+        <p className="mb-2.5 text-xs leading-relaxed text-muted-foreground">{t.prayerDesc}</p>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-2.5">
+          <div>
+            <p className="text-[13px] font-bold">{t.prayerEnabledLabel}</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t.prayerEnabledDesc}</p>
+          </div>
+          <Switch on={!!draft.enabled} onToggle={() => { const next = !draft.enabled; set({ enabled: next }); onToggleEnabled?.(next); }} />
+        </div>
+      </Section>
+
+      <Section icon={MapPin} title={t.prayerLocation}>
+        {!custom ? (
+          <>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label={t.countryLabel}>
+                <Select value={draftCountry} onChange={(e) => pickCountry(e.target.value)}>
+                  {countries.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={t.placeLabel}>
+                <Select value={draft.city || ''} onChange={(e) => pickCity(e.target.value)}>
+                  {places.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {lang === 'ar' ? (c.nameAr || c.name) : c.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            {(() => {
+              const sel = cityOf(draft.city);
+              return sel ? (
+                <p className="mt-2 text-[11px] text-muted-foreground" dir="ltr">
+                  {sel.lat.toFixed(3)}, {sel.lng.toFixed(3)} · {sel.tz}
+                </p>
+              ) : null;
+            })()}
+          </>
+        ) : (
+          <div className="grid grid-cols-3 gap-2.5">
+            <Field label={t.latLabel}>
+              <Input type="number" step="any" value={draft.lat ?? ''} onChange={(e) => set({ lat: parseFloat(e.target.value) })} dir="ltr" className="tabular text-center" />
+            </Field>
+            <Field label={t.lngLabel}>
+              <Input type="number" step="any" value={draft.lng ?? ''} onChange={(e) => set({ lng: parseFloat(e.target.value) })} dir="ltr" className="tabular text-center" />
+            </Field>
+            <Field label={t.tzLabel}>
+              <Input value={draft.tz || ''} onChange={(e) => set({ tz: e.target.value })} dir="ltr" placeholder="Africa/Cairo" className="text-center" />
+            </Field>
+          </div>
+        )}
+        <button
+          onClick={() => { const next = !custom; setCustom(next); if (next) set({ city: 'custom' }); }}
+          className="mt-2.5 text-[11px] font-bold text-primary hover:underline"
+        >
+          {custom ? t.placeLabel : `${t.useCustom} · ${t.customLocation}`}
+        </button>
+        {custom && <p className="mt-1 text-[11px] text-muted-foreground" dir="ltr">{t.tzHint}</p>}
+      </Section>
+
+      <Section icon={Sunrise} title={t.prayerMethod}>
+        <Select value={draft.method || 'egypt'} onChange={(e) => set({ method: e.target.value })}>
+          {PRAYER_METHODS.map((m) => (
+            <option key={m.value} value={m.value}>{t[m.labelKey] || m.value}</option>
+          ))}
+        </Select>
+        <div className="mt-2.5">
+          <Label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{t.asrLabel}</Label>
+          <div className="inline-flex flex-wrap gap-1 rounded-xl bg-muted p-1">
+            {[
+              { value: false, label: t.asrStandard },
+              { value: true, label: t.asrHanafi },
+            ].map((o) => (
+              <button
+                key={String(o.value)}
+                onClick={() => set({ asrHanafi: o.value })}
+                className={cn(
+                  'rounded-lg px-3 py-1.5 text-xs font-bold transition-all',
+                  !!draft.asrHanafi === o.value ? 'border bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-2.5">
+          <Label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{t.clockLabel}</Label>
+          <Seg value={draft.clock12h === false ? 'h24' : 'h12'} onPick={(v) => set({ clock12h: v === 'h12' })} options={[
+            { value: 'h12', label: t.clock12 },
+            { value: 'h24', label: t.clock24 },
+          ]} />
+        </div>
+      </Section>
+
+      <Section icon={Sunrise} title={t.todayTimes}>
+        {times.length === 0 ? (
+          <p className="py-1 text-xs text-muted-foreground">…</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5">
+            {PRAYER_KEYS.map((k) => {
+              const row = times.find((x) => x.key === k);
+              return (
+                <div key={k} className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5">
+                  <span className="text-xs font-bold">{t[k] || k}</span>
+                  <span dir="ltr" className="tabular text-xs text-muted-foreground">{formatClock(row?.time || '', draft.clock12h !== false, lang) || '—'}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <Button
+          size="sm" className="mt-2.5"
+          onClick={() => onSave?.({ ...draft, city: custom ? 'custom' : (draft.city || 'cairo') })}
+        >
+          {savedFlash ? <Check /> : null} {savedFlash ? t.copied : t.saveChanges}
+        </Button>
       </Section>
     </div>
   );
@@ -850,9 +1193,12 @@ function McpTab({ t, exePath }) {
 /* ---------------- settings window ---------------- */
 
 const TABS = [
+  { key: 'general', Icon: Globe },
   { key: 'appearance', Icon: Palette },
   { key: 'planning', Icon: CalendarRange },
   { key: 'contexts', Icon: Users },
+  { key: 'prayer', Icon: Sunrise },
+  { key: 'activity', Icon: Activity },
   { key: 'data', Icon: Database },
   { key: 'mcp', Icon: Bot },
 ];
@@ -879,6 +1225,13 @@ export function SettingsSheet(props) {
         ))}
       </div>
       <SheetBody>
+        {tab === 'general' && (
+          <GeneralTab
+            t={t} lang={props.lang} onLangChange={props.onLangChange}
+            autostartOn={props.autostartOn} autostartBusy={props.autostartBusy}
+            autostartErr={props.autostartErr} onAutostartToggle={props.onAutostartToggle}
+          />
+        )}
         {tab === 'appearance' && (
           <AppearanceTab t={t} value={props.value} dirty={props.dirty} onChange={props.onChange} onReset={props.onReset} />
         )}
@@ -887,6 +1240,28 @@ export function SettingsSheet(props) {
         )}
         {tab === 'contexts' && (
           <ContextsTab t={t} contexts={props.contexts} onCreate={props.onCreateContext} onUpdate={props.onUpdateContexts} onDelete={props.onDeleteContext} />
+        )}
+        {tab === 'prayer' && (
+          <PrayerTab
+            t={t} lang={props.lang}
+            initial={props.prayerSettings}
+            onToggleEnabled={props.onTogglePrayer}
+            onSave={props.onSavePrayer}
+            savedFlash={props.prayerSavedFlash}
+          />
+        )}
+        {tab === 'activity' && (
+          <ActivityTab
+            t={t} enabled={props.activityEnabled} busy={props.activityBusy}
+            onToggleEnabled={props.onToggleActivity}
+            alertsOn={props.activityAlertsOn} onToggleAlerts={props.onToggleActivityAlerts}
+            dailyMin={props.activityDailyMin} sessionMin={props.activitySessionMin}
+            onSaveThresholds={props.onSaveActivityThresholds}
+            live={props.activityLive} onOpenInsights={props.onOpenInsights}
+            onClear={props.onClearActivity} clearMsg={props.activityClearMsg}
+            retentionDays={props.activityRetentionDays} onSaveRetention={props.onSaveActivityRetention}
+            stats={props.activityStats} onPruneNow={props.onPruneActivityNow} pruneMsg={props.activityPruneMsg}
+          />
         )}
         {tab === 'data' && (
           <DataTab

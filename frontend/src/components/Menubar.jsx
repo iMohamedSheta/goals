@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   Plus, Star, X, Minus, Square, LayoutGrid, List as ListIcon, CalendarDays, CalendarRange,
   Rocket, Settings2, Users, Languages, Power, Check, PictureInPicture2, Palette, Database,
+  Activity,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { horizonName } from '../lib/i18n';
@@ -66,7 +67,7 @@ function Sep() {
 export function Menubar({
   t, lang, horizons, activeHorizon, view, focusOnly, hasFilters, timerRunning,
   onNewTask, onView, onHorizon, onFocusToggle, onClearFilters, onMini,
-  onSettings, onLangToggle, onQuit,
+  onSettings, onLangToggle, onQuit, onOpenInsights,
 }) {
   const [open, setOpen] = React.useState(null);
   const close = () => setOpen(null);
@@ -87,6 +88,7 @@ export function Menubar({
       items: [
         { icon: Plus, label: t.newTask, shortcut: t.newTaskShortcut, onClick: run(onNewTask) },
         { icon: Star, label: t.focus, checked: focusOnly, onClick: run(onFocusToggle) },
+        { icon: Activity, label: t.insights, onClick: run(onOpenInsights) },
         { type: 'sep' },
         { icon: X, label: t.clear, disabled: !hasFilters, onClick: run(onClearFilters) },
       ],

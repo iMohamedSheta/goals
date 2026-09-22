@@ -34,6 +34,10 @@ export function CheckForUpdates(arg1) {
   return window['go']['main']['App']['CheckForUpdates'](arg1);
 }
 
+export function ClearActivity(arg1) {
+  return window['go']['main']['App']['ClearActivity'](arg1);
+}
+
 export function CreateContext(arg1, arg2) {
   return window['go']['main']['App']['CreateContext'](arg1, arg2);
 }
@@ -94,6 +98,34 @@ export function GetActiveTimers() {
   return window['go']['main']['App']['GetActiveTimers']();
 }
 
+export function GetActivityEnabled() {
+  return window['go']['main']['App']['GetActivityEnabled']();
+}
+
+export function GetActivityRetention() {
+  return window['go']['main']['App']['GetActivityRetention']();
+}
+
+export function GetActivityStats() {
+  return window['go']['main']['App']['GetActivityStats']();
+}
+
+export function GetActivityStatus() {
+  return window['go']['main']['App']['GetActivityStatus']();
+}
+
+export function GetActivitySummary(arg1, arg2) {
+  return window['go']['main']['App']['GetActivitySummary'](arg1, arg2);
+}
+
+export function GetAppLanguage() {
+  return window['go']['main']['App']['GetAppLanguage']();
+}
+
+export function GetAutostartEnabled() {
+  return window['go']['main']['App']['GetAutostartEnabled']();
+}
+
 export function GetContext(arg1, arg2) {
   return window['go']['main']['App']['GetContext'](arg1, arg2);
 }
@@ -120,6 +152,22 @@ export function GetDataDir() {
 
 export function GetDriveStatus() {
   return window['go']['main']['App']['GetDriveStatus']();
+}
+
+export function GetPrayerSettings() {
+  return window['go']['main']['App']['GetPrayerSettings']();
+}
+
+export function GetPrayerStatus() {
+  return window['go']['main']['App']['GetPrayerStatus']();
+}
+
+export function GetPrayerTimes(arg1) {
+  return window['go']['main']['App']['GetPrayerTimes'](arg1);
+}
+
+export function GetPrayerTimesFor(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GetPrayerTimesFor'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetSettings() {
@@ -154,6 +202,10 @@ export function InstallUpdateAndRestart() {
   return window['go']['main']['App']['InstallUpdateAndRestart']();
 }
 
+export function ListActivitySegments(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListActivitySegments'](arg1, arg2, arg3, arg4);
+}
+
 export function ListContextEntries(arg1) {
   return window['go']['main']['App']['ListContextEntries'](arg1);
 }
@@ -168,6 +220,10 @@ export function ListDriveBackups() {
 
 export function ListHorizons() {
   return window['go']['main']['App']['ListHorizons']();
+}
+
+export function ListPrayerCities() {
+  return window['go']['main']['App']['ListPrayerCities']();
 }
 
 export function ListTasks(arg1) {
@@ -194,6 +250,18 @@ export function PollDriveAuth() {
   return window['go']['main']['App']['PollDriveAuth']();
 }
 
+export function PrayerGoing() {
+  return window['go']['main']['App']['PrayerGoing']();
+}
+
+export function PrayerSnooze(arg1) {
+  return window['go']['main']['App']['PrayerSnooze'](arg1);
+}
+
+export function PruneActivityNow() {
+  return window['go']['main']['App']['PruneActivityNow']();
+}
+
 export function QuitApp() {
   return window['go']['main']['App']['QuitApp']();
 }
@@ -216,6 +284,26 @@ export function SaveDriveCredentials(arg1, arg2) {
 
 export function SetAIModel(arg1) {
   return window['go']['main']['App']['SetAIModel'](arg1);
+}
+
+export function SetActivityEnabled(arg1) {
+  return window['go']['main']['App']['SetActivityEnabled'](arg1);
+}
+
+export function SetActivityRetention(arg1) {
+  return window['go']['main']['App']['SetActivityRetention'](arg1);
+}
+
+export function SetAppLanguage(arg1) {
+  return window['go']['main']['App']['SetAppLanguage'](arg1);
+}
+
+export function SetAutostartEnabled(arg1) {
+  return window['go']['main']['App']['SetAutostartEnabled'](arg1);
+}
+
+export function SetPrayerSettings(arg1) {
+  return window['go']['main']['App']['SetPrayerSettings'](arg1);
 }
 
 export function SetSetting(arg1, arg2) {

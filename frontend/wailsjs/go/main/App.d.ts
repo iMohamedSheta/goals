@@ -4,6 +4,9 @@ import {ai} from '../models';
 import {drive} from '../models';
 import {update} from '../models';
 import {store} from '../models';
+import {activity} from '../models';
+import {prayer} from '../models';
+import {main} from '../models';
 
 export function AIBusy():Promise<boolean>;
 
@@ -20,6 +23,8 @@ export function CancelAI():Promise<void>;
 export function CancelDriveAuth():Promise<void>;
 
 export function CheckForUpdates(arg1:boolean):Promise<update.Status>;
+
+export function ClearActivity(arg1:string):Promise<number>;
 
 export function CreateContext(arg1:string,arg2:string):Promise<store.Context>;
 
@@ -51,6 +56,20 @@ export function GetActiveTimer():Promise<store.TaskDetail>;
 
 export function GetActiveTimers():Promise<Array<store.TaskDetail>>;
 
+export function GetActivityEnabled():Promise<boolean>;
+
+export function GetActivityRetention():Promise<number>;
+
+export function GetActivityStats():Promise<store.ActivityStats>;
+
+export function GetActivityStatus():Promise<activity.CurrentStatus>;
+
+export function GetActivitySummary(arg1:string,arg2:string):Promise<store.ActivitySummary>;
+
+export function GetAppLanguage():Promise<string>;
+
+export function GetAutostartEnabled():Promise<boolean>;
+
 export function GetContext(arg1:string,arg2:string):Promise<store.Context>;
 
 export function GetContextTasksTotal(arg1:string):Promise<number>;
@@ -64,6 +83,14 @@ export function GetDBPath():Promise<string>;
 export function GetDataDir():Promise<string>;
 
 export function GetDriveStatus():Promise<drive.Status>;
+
+export function GetPrayerSettings():Promise<prayer.Settings>;
+
+export function GetPrayerStatus():Promise<prayer.PrayerStatus>;
+
+export function GetPrayerTimes(arg1:string):Promise<Array<main.PrayerDayTime>>;
+
+export function GetPrayerTimesFor(arg1:number,arg2:number,arg3:string,arg4:string,arg5:boolean,arg6:string):Promise<Array<main.PrayerDayTime>>;
 
 export function GetSettings():Promise<Record<string, string>>;
 
@@ -81,6 +108,8 @@ export function ImportDatabaseFile(arg1:string):Promise<void>;
 
 export function InstallUpdateAndRestart():Promise<void>;
 
+export function ListActivitySegments(arg1:string,arg2:string,arg3:string,arg4:number):Promise<Array<store.ActivitySegment>>;
+
 export function ListContextEntries(arg1:string):Promise<Array<store.ContextTimeEntry>>;
 
 export function ListContexts(arg1:string):Promise<Array<store.Context>>;
@@ -88,6 +117,8 @@ export function ListContexts(arg1:string):Promise<Array<store.Context>>;
 export function ListDriveBackups():Promise<Array<drive.BackupFile>>;
 
 export function ListHorizons():Promise<Array<store.Horizon>>;
+
+export function ListPrayerCities():Promise<Array<prayer.City>>;
 
 export function ListTasks(arg1:store.TaskFilter):Promise<Array<store.TaskDetail>>;
 
@@ -101,6 +132,12 @@ export function PickDatabaseFile():Promise<string>;
 
 export function PollDriveAuth():Promise<drive.DevicePoll>;
 
+export function PrayerGoing():Promise<void>;
+
+export function PrayerSnooze(arg1:number):Promise<void>;
+
+export function PruneActivityNow():Promise<number>;
+
 export function QuitApp():Promise<void>;
 
 export function ReorderTasks(arg1:Array<string>):Promise<void>;
@@ -112,6 +149,16 @@ export function RestoreDriveBackup(arg1:string):Promise<void>;
 export function SaveDriveCredentials(arg1:string,arg2:string):Promise<void>;
 
 export function SetAIModel(arg1:string):Promise<void>;
+
+export function SetActivityEnabled(arg1:boolean):Promise<void>;
+
+export function SetActivityRetention(arg1:number):Promise<void>;
+
+export function SetAppLanguage(arg1:string):Promise<void>;
+
+export function SetAutostartEnabled(arg1:boolean):Promise<void>;
+
+export function SetPrayerSettings(arg1:main.PrayerSettingsInput):Promise<void>;
 
 export function SetSetting(arg1:string,arg2:string):Promise<void>;
 

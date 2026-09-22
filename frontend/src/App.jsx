@@ -10,6 +10,8 @@ import { KanbanBoard, TaskTable, ViewToggle, STATUSES, ActiveTimerPill, ActiveCo
 import { TaskSheet, ConfirmModal } from './components/Dialogs';
 import { ChatDrawer } from './components/ChatDrawer';
 import { SettingsSheet } from './components/SettingsSheet';
+import { ActivityInsights } from './components/ActivityInsights';
+import { PrayerAlert } from './components/PrayerAlert';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
 import {
   DEFAULT_APPEARANCE, loadLocalAppearance, saveLocalAppearance, applyAppearance,
@@ -25,6 +27,10 @@ import {
   GetDriveStatus, SaveDriveCredentials, StartDriveAuth, PollDriveAuth, CancelDriveAuth, DisconnectDrive,
   BackupNow, ListDriveBackups, DeleteDriveBackup, RestoreDriveBackup, ImportDatabaseFile,
   GetVersion, CheckForUpdates, DownloadUpdate, InstallUpdateAndRestart,
+  GetAppLanguage, SetAppLanguage, GetAutostartEnabled, SetAutostartEnabled,
+  GetActivityEnabled, SetActivityEnabled, GetActivityStatus, ClearActivity,
+  GetActivityRetention, SetActivityRetention, PruneActivityNow, GetActivityStats,
+  GetPrayerSettings, SetPrayerSettings, GetPrayerStatus, PrayerSnooze, PrayerGoing,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload, WindowUnfullscreen, WindowUnmaximise, WindowMaximise, WindowIsFullscreen, WindowIsMaximised } from '../wailsjs/runtime/runtime';
 import brandLogo from './assets/logo.png';
@@ -54,8 +60,8 @@ export default function App() {
 
   const [sheet, setSheet] = React.useState({ open: false, task: null, presetStatus: 'todo', presetParentId: '' });
   const [entries, setEntries] = React.useState([]);
-  const [settings, setSettings] = React.useState({ open: false, tab: 'appearance' });
-  const openSettings = (tab) => setSettings({ open: true, tab: tab || 'appearance' });
+  const [settings, setSettings] = React.useState({ open: false, tab: 'general' });
+  const openSettings = (tab) => setSettings({ open: true, tab: tab || 'general' });
   const [confirm, setConfirm] = React.useState({ open: false, task: null });
   const [finishConfirm, setFinishConfirm] = React.useState({ open: false, task: null, secs: 0 });
   const [restoreConfirm, setRestoreConfirm] = React.useState({ open: false, id: null, name: '' });
@@ -64,6 +70,31 @@ export default function App() {
   const [activeCount, setActiveCount] = React.useState(1);
   const [miniMode, setMiniMode] = React.useState(null); // null | 'widget' | 'side'
   const [chatOpen, setChatOpen] = React.useState(false);
+
+  // general settings: language (persisted) + OS autostart (default off)
+  const [autostartOn, setAutostartOn] = React.useState(false);
+  const [autostartBusy, setAutostartBusy] = React.useState(false);
+  const [autostartErr, setAutostartErr] = React.useState('');
+
+  // activity tracking (opt-in, default off) + insights
+  const [insightsOpen, setInsightsOpen] = React.useState(false);
+  const [activityEnabled, setActivityEnabled] = React.useState(false);
+  const [activityBusy, setActivityBusy] = React.useState(false);
+  const [activityAlertsOn, setActivityAlertsOn] = React.useState(true);
+  const [activityDailyMin, setActivityDailyMin] = React.useState(30);
+  const [activitySessionMin, setActivitySessionMin] = React.useState(10);
+  const [activityLive, setActivityLive] = React.useState(null);
+  const [activityClearMsg, setActivityClearMsg] = React.useState('');
+  const [activityRetentionDays, setActivityRetentionDays] = React.useState(90);
+  const [activityStats, setActivityStats] = React.useState(null);
+  const [activityPruneMsg, setActivityPruneMsg] = React.useState('');
+  const [distraction, setDistraction] = React.useState(null); // toast from backend alert
+
+  // prayer times & alerts (opt-in, default off)
+  const [prayerSettings, setPrayerSettings] = React.useState(null);
+  const [prayerStatus, setPrayerStatus] = React.useState(null);
+  const [prayerDue, setPrayerDue] = React.useState(null);
+  const [prayerSavedFlash, setPrayerSavedFlash] = React.useState(false);
 
   // context goals: every context doubles as a focus goal with its own
   // timer running in parallel with the task timer
@@ -96,6 +127,136 @@ export default function App() {
       for (const [k, v] of settingsDiff(appearance, DEFAULT_APPEARANCE)) await SetSetting(k, v);
     } catch { /* noop */ }
   }, [appearance]);
+
+  const changeLang = React.useCallback(async (l) => {
+    const v = l === 'en' ? 'en' : 'ar';
+    setLang(v);
+    try { await SetAppLanguage(v); } catch { /* backend offline — localStorage still wins */ }
+  }, []);
+
+  const toggleAutostart = React.useCallback(async () => {
+    setAutostartBusy(true);
+    setAutostartErr('');
+    try {
+      const next = !autostartOn;
+      await SetAutostartEnabled(next);
+      setAutostartOn(next);
+    } catch (e) {
+      setAutostartErr(String(e?.message || e));
+    } finally {
+      setAutostartBusy(false);
+    }
+  }, [autostartOn]);
+
+  const toggleActivity = React.useCallback(async () => {
+    setActivityBusy(true);
+    try {
+      const next = !activityEnabled;
+      await SetActivityEnabled(next);
+      setActivityEnabled(next);
+      if (next) {
+        try { setActivityLive(await GetActivityStatus()); } catch { /* noop */ }
+      } else {
+        setActivityLive(null);
+      }
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setActivityBusy(false);
+    }
+  }, [activityEnabled]);
+
+  const toggleActivityAlerts = React.useCallback(async () => {
+    const next = !activityAlertsOn;
+    setActivityAlertsOn(next);
+    try { await SetSetting('activity.alerts', next ? '1' : '0'); } catch { /* noop */ }
+  }, [activityAlertsOn]);
+
+  const saveActivityThresholds = React.useCallback(async (dailyMin, sessionMin) => {
+    setActivityDailyMin(dailyMin);
+    setActivitySessionMin(sessionMin);
+    try {
+      await SetSetting('activity.daily_threshold', String(Math.round(dailyMin * 60)));
+      await SetSetting('activity.session_threshold', String(Math.round(sessionMin * 60)));
+    } catch { /* noop */ }
+  }, []);
+
+  const clearActivityData = React.useCallback(async () => {
+    try {
+      await ClearActivity('');
+      setActivityClearMsg(t.clearedOk);
+      setTimeout(() => setActivityClearMsg(''), 2500);
+      try { setActivityStats(await GetActivityStats()); } catch { /* noop */ }
+    } catch (e) {
+      setActivityClearMsg(String(e?.message || e));
+    }
+  }, [t]);
+
+  const refreshActivityStats = React.useCallback(async () => {
+    try { setActivityStats(await GetActivityStats()); } catch { /* noop */ }
+  }, []);
+
+  const saveActivityRetention = React.useCallback(async (days) => {
+    const d = Math.max(0, Math.min(3650, +days || 0));
+    setActivityRetentionDays(d);
+    try {
+      await SetActivityRetention(d);
+      await refreshActivityStats();
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  }, [refreshActivityStats]);
+
+  const pruneActivityNow = React.useCallback(async () => {
+    try {
+      const n = await PruneActivityNow();
+      setActivityPruneMsg(t.prunedMsg(n ?? 0));
+      setTimeout(() => setActivityPruneMsg(''), 3000);
+      await refreshActivityStats();
+    } catch (e) {
+      setActivityPruneMsg(String(e?.message || e));
+    }
+  }, [t, refreshActivityStats]);
+
+  // ---------- prayer alerts ----------
+
+  const refreshPrayerStatus = React.useCallback(async () => {
+    try { setPrayerStatus(await GetPrayerStatus()); } catch { /* noop */ }
+  }, []);
+
+  const togglePrayer = React.useCallback(async (next) => {
+    const base = prayerSettings || { method: 'egypt', asrHanafi: false, city: 'cairo', lat: 30.0444, lng: 31.2357, tz: 'Africa/Cairo', clock12h: true };
+    const updated = { ...base, enabled: !!next };
+    setPrayerSettings(updated);
+    try {
+      await SetPrayerSettings(updated);
+      await refreshPrayerStatus();
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  }, [prayerSettings, refreshPrayerStatus]);
+
+  const savePrayer = React.useCallback(async (draft) => {
+    try {
+      await SetPrayerSettings({ ...draft, enabled: draft.enabled ?? prayerSettings?.enabled ?? false });
+      setPrayerSettings(await GetPrayerSettings());
+      await refreshPrayerStatus();
+      setPrayerSavedFlash(true);
+      setTimeout(() => setPrayerSavedFlash(false), 1500);
+    } catch (e) {
+      alert(String(e?.message || e));
+    }
+  }, [prayerSettings, refreshPrayerStatus]);
+
+  const snoozePrayer = React.useCallback(async (minutes) => {
+    try { await PrayerSnooze(minutes); } catch { /* noop */ }
+    setPrayerDue(null);
+  }, []);
+
+  const goingPrayer = React.useCallback(async () => {
+    try { await PrayerGoing(); } catch { /* noop */ }
+    setPrayerDue(null);
+  }, []);
 
   const searchRef = React.useRef(null);
   const contextOf = React.useCallback((id) => contexts.find((c) => c.id === id), [contexts]);
@@ -209,6 +370,46 @@ export default function App() {
           setActiveHorizon((cur) => ((hs || []).some((h) => h.key === cur) ? cur : hs[0].key));
         }
         const merged = fromSettingsMap(backendSettings);
+        // backend language wins when saved (Settings → General persists it)
+        try {
+          const savedLang = (backendSettings?.['app.language'] || '').trim().toLowerCase();
+          if (savedLang === 'en' || savedLang === 'ar') {
+            setLang(savedLang);
+          } else {
+            try {
+              const bl = await GetAppLanguage();
+              if (bl === 'en' || bl === 'ar') setLang(bl);
+            } catch { /* keep local */ }
+          }
+        } catch { /* keep local */ }
+        // autostart is OFF by default — reflect the real OS state
+        try {
+          setAutostartOn(await GetAutostartEnabled());
+        } catch { /* unsupported platform */ }
+        // activity tracking is OFF by default — reflect persisted flag
+        try {
+          const en = await GetActivityEnabled();
+          setActivityEnabled(!!en);
+          const m = backendSettings || {};
+          if (m['activity.alerts'] === '0' || m['activity.alerts'] === 'false') setActivityAlertsOn(false);
+          const d = parseInt(m['activity.daily_threshold'] || '1800', 10);
+          if (!Number.isNaN(d) && d >= 0) setActivityDailyMin(Math.round(d / 60));
+          const s = parseInt(m['activity.session_threshold'] || '600', 10);
+          if (!Number.isNaN(s) && s >= 0) setActivitySessionMin(Math.round(s / 60));
+          try {
+            setActivityRetentionDays(await GetActivityRetention());
+          } catch { /* keep default */ }
+          try {
+            setActivityStats(await GetActivityStats());
+          } catch { /* noop */ }
+          try {
+            setPrayerSettings(await GetPrayerSettings());
+            setPrayerStatus(await GetPrayerStatus());
+          } catch { /* prayer unavailable */ }
+          if (en) {
+            try { setActivityLive(await GetActivityStatus()); } catch { /* noop */ }
+          }
+        } catch { /* tracking unavailable */ }
         // backend wins: it holds every key the user ever saved
         const hasBackend = backendSettings && Object.keys(backendSettings).some((k) => k.startsWith('appearance.'));
         if (hasBackend) {
@@ -281,6 +482,48 @@ export default function App() {
     });
     return () => { off?.(); offCtx?.(); };
   }, []);
+
+  // app-usage tracking: live status + distraction toasts from the backend
+  React.useEffect(() => {
+    const offTick = EventsOn('activity:tick', (s) => {
+      setActivityLive(s || null);
+    });
+    const offAlert = EventsOn('activity:distraction', (info) => {
+      try {
+        const kind = info?.kind === 'daily' ? 'daily' : 'session';
+        const app = info?.app || '';
+        const secs = kind === 'daily' ? (info?.daySeconds || 0) : (info?.sessionSeconds || 0);
+        const hh = formatHMS(secs);
+        const msg = kind === 'daily' ? t.distractionDaily(hh) : t.distractionSession(app, hh);
+        setDistraction({ kind, app, detail: info?.detail || '', msg });
+        setTimeout(() => setDistraction((d) => (d?.msg === msg ? null : d)), 14000);
+      } catch { /* noop */ }
+    });
+    const offEn = EventsOn('activity:enabled', (on) => {
+      setActivityEnabled(!!on);
+    });
+    return () => { offTick?.(); offAlert?.(); offEn?.(); };
+  }, [t]);
+
+  // prayer countdown refresh (every minute while enabled) + due modal
+  React.useEffect(() => {
+    if (!prayerSettings?.enabled) return;
+    refreshPrayerStatus();
+    const id = setInterval(refreshPrayerStatus, 60000);
+    return () => clearInterval(id);
+  }, [prayerSettings?.enabled, refreshPrayerStatus]);
+
+  React.useEffect(() => {
+    const off = EventsOn('prayer:due', (info) => {
+      setPrayerDue(info || null);
+    });
+    return () => { off?.(); };
+  }, []);
+
+  // refresh storage stats whenever the Activity settings tab is opened
+  React.useEffect(() => {
+    if (settings.open && settings.tab === 'activity') refreshActivityStats();
+  }, [settings.open, settings.tab, refreshActivityStats]);
 
   // debounce search
   const [debounced, setDebounced] = React.useState('');
@@ -658,7 +901,8 @@ export default function App() {
         onClearFilters={clearFilters}
         onMini={enterMini}
         onSettings={(tab) => openSettings(tab)}
-        onLangToggle={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
+        onLangToggle={() => changeLang(lang === 'ar' ? 'en' : 'ar')}
+        onOpenInsights={() => setInsightsOpen(true)}
         onQuit={quitApp}
       />
       <div className="flex min-h-0 flex-1">
@@ -666,7 +910,7 @@ export default function App() {
         t={t}
         lang={lang}
         ap={appearance}
-        onLangToggle={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
+        onLangToggle={() => changeLang(lang === 'ar' ? 'en' : 'ar')}
         horizons={horizons}
         contexts={contexts}
         counts={counts}
@@ -681,7 +925,11 @@ export default function App() {
         dbPath={dbPath}
         timerRunning={!!active || !!activeContext}
         onQuit={quitApp}
-        onSettings={() => openSettings('appearance')}
+        onSettings={() => openSettings('general')}
+        onOpenInsights={() => setInsightsOpen(true)}
+        activityEnabled={activityEnabled}
+        prayerStatus={prayerStatus}
+        onOpenPrayer={() => openSettings('prayer')}
         onOpenFolder={async () => { try { await OpenDataFolder(); } catch { /* noop */ } }}
         version={version}
         updateAvailable={!!latestTag}
@@ -826,6 +1074,32 @@ export default function App() {
       <SettingsSheet
         t={t}
         lang={lang}
+        onLangChange={changeLang}
+        autostartOn={autostartOn}
+        autostartBusy={autostartBusy}
+        autostartErr={autostartErr}
+        onAutostartToggle={toggleAutostart}
+        activityEnabled={activityEnabled}
+        activityBusy={activityBusy}
+        onToggleActivity={toggleActivity}
+        activityAlertsOn={activityAlertsOn}
+        onToggleActivityAlerts={toggleActivityAlerts}
+        activityDailyMin={activityDailyMin}
+        activitySessionMin={activitySessionMin}
+        onSaveActivityThresholds={saveActivityThresholds}
+        activityLive={activityLive}
+        onOpenInsights={() => { setSettings((s) => ({ ...s, open: false })); setInsightsOpen(true); }}
+        onClearActivity={clearActivityData}
+        activityClearMsg={activityClearMsg}
+        activityRetentionDays={activityRetentionDays}
+        onSaveActivityRetention={saveActivityRetention}
+        activityStats={activityStats}
+        onPruneActivityNow={pruneActivityNow}
+        activityPruneMsg={activityPruneMsg}
+        prayerSettings={prayerSettings}
+        onTogglePrayer={togglePrayer}
+        onSavePrayer={savePrayer}
+        prayerSavedFlash={prayerSavedFlash}
         open={settings.open}
         onClose={() => setSettings((s) => ({ ...s, open: false }))}
         tab={settings.tab}
@@ -918,6 +1192,50 @@ export default function App() {
         onClose={() => setChatOpen(false)}
         onTasksChanged={refresh}
       />
+      <ActivityInsights
+        t={t}
+        open={insightsOpen}
+        onClose={() => setInsightsOpen(false)}
+        enabled={activityEnabled}
+      />
+      <PrayerAlert
+        t={t}
+        lang={lang}
+        event={prayerDue}
+        use12h={prayerSettings?.clock12h !== false}
+        onSnooze={snoozePrayer}
+        onGoing={goingPrayer}
+        onClose={() => setPrayerDue(null)}
+      />
+      {distraction && (
+        <div className="fixed bottom-5 start-5 z-50 max-w-sm rounded-xl border border-amber-500/40 bg-card p-3.5 shadow-2xl animate-slide-in">
+          <div className="flex items-start gap-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-bold text-amber-300">
+                {distraction.kind === 'daily' ? t.wastedTime : distraction.app || t.wastedTime}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{distraction.msg}</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => { setDistraction(null); setInsightsOpen(true); }}
+                  className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground hover:opacity-90"
+                >
+                  {t.openInsights}
+                </button>
+                <button
+                  onClick={() => setDistraction(null)}
+                  className="rounded-md border px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:text-foreground"
+                >
+                  {t.dismiss}
+                </button>
+              </div>
+            </div>
+            <button onClick={() => setDistraction(null)} className="text-muted-foreground hover:text-foreground">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
       {!chatOpen && (
         <button
           onClick={() => setChatOpen(true)}

@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass, Play, Pause } from 'lucide-react';
+import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass, Play, Pause, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Progress } from './ui/form';
 import { horizonName, horizonDesc, formatHMS } from '../lib/i18n';
 import { LiveTime } from './Board';
+import { NextPrayerPill } from './PrayerAlert';
 import { RADIUS, animClass, DEFAULT_APPEARANCE } from '../lib/appearance';
 import sideLogoDark from '../assets/side-logo-dark.png';
 import sideLogoLight from '../assets/side-logo-light.png';
@@ -114,6 +115,8 @@ export function Sidebar({
   version, updateAvailable, onOpenUpdates,
   ap = DEFAULT_APPEARANCE,
   onStartContext, onPauseContext,
+  onOpenInsights, activityEnabled,
+  prayerStatus, onOpenPrayer,
 }) {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e bg-card/50">
@@ -193,6 +196,19 @@ export function Sidebar({
                 {focusedCount}
               </span>
             </button>
+            <button
+              onClick={onOpenInsights}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start transition-colors hover:bg-accent/60"
+            >
+              <span className="flex size-7 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground">
+                <Activity size={15} />
+              </span>
+              <span className="flex-1 text-[13px] font-semibold">{t.insights}</span>
+              <span className={cn('flex items-center gap-1.5 text-[11px] font-semibold', activityEnabled ? 'text-emerald-400' : 'text-muted-foreground')}>
+                <span className={cn('size-1.5 rounded-full', activityEnabled ? 'bg-emerald-400' : 'bg-muted-foreground/50')} />
+                {activityEnabled ? t.trackingOn : t.trackingOff}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -235,6 +251,7 @@ export function Sidebar({
             <span>{t.bgHint}</span>
           </div>
         )}
+        <NextPrayerPill t={t} status={prayerStatus} onOpen={onOpenPrayer} />
       </div>
 
       <div className="space-y-1 border-t p-3">

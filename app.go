@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"goals/internal/activity"
 	"goals/internal/alert"
 	"goals/internal/drive"
+	"goals/internal/prayer"
 	"goals/internal/store"
 	"goals/internal/tray"
 	"goals/internal/update"
@@ -30,6 +32,9 @@ type App struct {
 
 	overtimeMu       sync.Mutex
 	overtimeNotified map[string]bool
+
+	activityTracker *activity.Tracker
+	prayerReminder  *prayer.Reminder
 }
 
 // NewApp creates a new App application struct
@@ -47,6 +52,10 @@ func (a *App) startup(ctx context.Context) {
 	a.store = s
 	// safety net: timestamped local backup on every launch (keep last 7)
 	go a.autoLocalBackup()
+	// usage tracking is opt-in (default OFF): resume only when enabled
+	a.syncActivityTracker()
+	// prayer alerts are opt-in (default OFF): resume only when enabled
+	a.syncPrayerReminder()
 	// resume ticking if a timer was left running (e.g. app restarted)
 	if _, err := s.GetActiveTimer(); err == nil {
 		a.ensureTick()
@@ -59,6 +68,12 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	a.stopTick()
 	tray.Stop()
+	if a.activityTracker != nil {
+		a.activityTracker.Stop()
+	}
+	if a.prayerReminder != nil {
+		a.prayerReminder.Stop()
+	}
 	if a.store != nil {
 		_ = a.store.CheckpointRunning()
 		_ = a.store.Close()
@@ -413,6 +428,10 @@ func (a *App) swapDatabase(data []byte) error {
 	} else if _, err := s.GetActiveContextTimer(""); err == nil {
 		a.ensureTick()
 	}
+	// rebind usage tracking to the swapped database
+	a.syncActivityTracker()
+	// rebind prayer reminders too
+	a.syncPrayerReminder()
 	return nil
 }
 
