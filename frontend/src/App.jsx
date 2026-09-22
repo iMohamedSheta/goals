@@ -11,7 +11,7 @@ import { TaskSheet, ConfirmModal } from './components/Dialogs';
 import { ChatDrawer } from './components/ChatDrawer';
 import { SettingsSheet } from './components/SettingsSheet';
 import { ActivityInsights } from './components/ActivityInsights';
-import { PrayerAlert } from './components/PrayerAlert';
+import { PrayerAlert, PrayerMiniBanner } from './components/PrayerAlert';
 import { STR, formatHMS, liveElapsed, horizonName, horizonDesc } from './lib/i18n';
 import {
   DEFAULT_APPEARANCE, loadLocalAppearance, saveLocalAppearance, applyAppearance,
@@ -32,7 +32,7 @@ import {
   GetActivityRetention, SetActivityRetention, PruneActivityNow, GetActivityStats,
   GetPrayerSettings, SetPrayerSettings, GetPrayerStatus, PrayerSnooze, PrayerGoing,
 } from '../wailsjs/go/main/App';
-import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload, WindowUnfullscreen, WindowUnmaximise, WindowMaximise, WindowIsFullscreen, WindowIsMaximised } from '../wailsjs/runtime/runtime';
+import { EventsOn, WindowSetSize, WindowSetMinSize, WindowSetAlwaysOnTop, WindowSetPosition, ScreenGetAll, WindowReload, WindowUnfullscreen, WindowUnmaximise, WindowMaximise, WindowIsFullscreen, WindowIsMaximised, WindowShow, WindowUnminimise } from '../wailsjs/runtime/runtime';
 import brandLogo from './assets/logo.png';
 
 export default function App() {
@@ -95,6 +95,11 @@ export default function App() {
   const [prayerStatus, setPrayerStatus] = React.useState(null);
   const [prayerDue, setPrayerDue] = React.useState(null);
   const [prayerSavedFlash, setPrayerSavedFlash] = React.useState(false);
+  // prayerFocus converts the window into a compact prayer-only alert until
+  // handled (forced popup without opening the full app). prayerRing counts
+  // rings so re-nags re-pin the popup.
+  const [prayerFocus, setPrayerFocus] = React.useState(false);
+  const [prayerRing, setPrayerRing] = React.useState(0);
 
   // context goals: every context doubles as a focus goal with its own
   // timer running in parallel with the task timer
@@ -248,15 +253,36 @@ export default function App() {
     }
   }, [prayerSettings, refreshPrayerStatus]);
 
+  // Prayer alerts are modal-only (no forced window popup): just make sure
+  // any stray topmost flag is cleared on handling — except in mini mode,
+  // where the widget itself stays topmost.
+  const miniModeRef = React.useRef(miniMode);
+  miniModeRef.current = miniMode;
+  const clearPrayerTop = React.useCallback(() => {
+    try { WindowSetAlwaysOnTop(!!miniModeRef.current); } catch { /* noop */ }
+  }, []);
+
   const snoozePrayer = React.useCallback(async (minutes) => {
     try { await PrayerSnooze(minutes); } catch { /* noop */ }
     setPrayerDue(null);
-  }, []);
+    setPrayerFocus(false);
+    clearPrayerTop();
+  }, [clearPrayerTop]);
 
   const goingPrayer = React.useCallback(async () => {
     try { await PrayerGoing(); } catch { /* noop */ }
     setPrayerDue(null);
-  }, []);
+    setPrayerFocus(false);
+    clearPrayerTop();
+  }, [clearPrayerTop]);
+
+  // X means "remind me in a minute" — re-rings via the normal snooze path.
+  const dismissPrayer = React.useCallback(async () => {
+    try { await PrayerSnooze(1); } catch { /* noop */ }
+    setPrayerDue(null);
+    setPrayerFocus(false);
+    clearPrayerTop();
+  }, [clearPrayerTop]);
 
   const searchRef = React.useRef(null);
   const contextOf = React.useCallback((id) => contexts.find((c) => c.id === id), [contexts]);
@@ -514,10 +540,15 @@ export default function App() {
   }, [prayerSettings?.enabled, refreshPrayerStatus]);
 
   React.useEffect(() => {
-    const off = EventsOn('prayer:due', (info) => {
-      setPrayerDue(info || null);
+    const offDue = EventsOn('prayer:due', (info) => {
+      if (!info) { setPrayerDue(null); setPrayerFocus(false); return; }
+      // The hadith ships inside the event (offline list) — same one on
+      // re-nags, so plain replace is correct.
+      setPrayerDue(info);
+      setPrayerRing((n) => n + 1);
+      if (!miniModeRef.current) setPrayerFocus(true);
     });
-    return () => { off?.(); };
+    return () => { offDue?.(); };
   }, []);
 
   // refresh storage stats whenever the Activity settings tab is opened
@@ -646,8 +677,73 @@ export default function App() {
   // grow the widget bar when both timers run so each stays visible
   React.useEffect(() => {
     if (miniMode !== 'widget') return;
+    if (prayerDue) return; // the prayer effect below owns the size while alerting
     applyMiniWindow(active && activeContext ? 'widget2' : 'widget');
   }, [miniMode, active?.id, activeContext?.id]); // eslint-disable-line
+
+  // grow the mini widget while a prayer alert is open so the banner fits;
+  // shrink back once the user goes to pray / snoozes / dismisses.
+  React.useEffect(() => {
+    if (!miniMode || miniMode === 'side') return;
+    try {
+      if (prayerDue) {
+        WindowSetMinSize(210, 80);
+        WindowSetSize(232, 172);
+      } else {
+        const s = (active && activeContext) ? MINI_SIZES.widget2 : MINI_SIZES.widget;
+        WindowSetMinSize(s.minW, s.minH);
+        WindowSetSize(s.w, s.h);
+      }
+    } catch { /* noop */ }
+  }, [miniMode, !!prayerDue, active?.id, activeContext?.id]); // eslint-disable-line
+
+  // Prayer focus: convert the window into a compact prayer-only alert popup
+  // (forced, topmost) instead of opening the full app. Restores the previous
+  // window once handled. Mini mode keeps its own banner path.
+  const prayerFocusActiveRef = React.useRef(false);
+  const prayerReturnRef = React.useRef({ wasMaximised: false });
+  React.useEffect(() => {
+    if (miniMode) return;
+    if (prayerFocus && prayerDue) {
+      if (!prayerFocusActiveRef.current) {
+        prayerFocusActiveRef.current = true;
+        (async () => {
+          try {
+            const [fs, mx] = await Promise.all([safeFlag(WindowIsFullscreen), safeFlag(WindowIsMaximised)]);
+            if (!prayerFocusActiveRef.current) return; // cleared while waiting
+            prayerReturnRef.current = { wasMaximised: !!(fs || mx) };
+            await leaveFullWindow();
+            try { WindowShow(); } catch { /* noop */ }
+            try { WindowUnminimise(); } catch { /* noop */ }
+            WindowSetAlwaysOnTop(true);
+            WindowSetMinSize(320, 420);
+            WindowSetSize(400, 580);
+          } catch { /* noop */ }
+        })();
+      } else {
+        // re-nag while already converted: re-pin topmost/size.
+        try {
+          WindowShow();
+          WindowUnminimise();
+          WindowSetAlwaysOnTop(true);
+          WindowSetSize(400, 580);
+        } catch { /* noop */ }
+      }
+    } else if (prayerFocusActiveRef.current) {
+      prayerFocusActiveRef.current = false;
+      (async () => {
+        try {
+          WindowSetAlwaysOnTop(false);
+          WindowSetSize(1280, 800);
+          WindowSetMinSize(940, 600);
+          if (prayerReturnRef.current.wasMaximised) {
+            setTimeout(() => { try { WindowMaximise(); } catch { /* noop */ } }, 120);
+            prayerReturnRef.current = { wasMaximised: false };
+          }
+        } catch { /* noop */ }
+      })();
+    }
+  }, [prayerFocus, miniMode, prayerRing]); // eslint-disable-line
 
   const enterMini = async () => {
     if (!active && !activeContext) return;
@@ -808,6 +904,17 @@ export default function App() {
   if (miniMode) {
     return (
       <div className="flex h-full flex-col overflow-hidden bg-background">
+        {prayerDue && (
+          <PrayerMiniBanner
+            t={t}
+            lang={lang}
+            event={prayerDue}
+            use12h={prayerSettings?.clock12h !== false}
+            onGoing={goingPrayer}
+            onSnooze={snoozePrayer}
+            onOpen={exitMini}
+          />
+        )}
         <div className="min-h-0 flex-1">
           {miniMode === 'widget' ? (
             <TimerWidget
@@ -1205,7 +1312,7 @@ export default function App() {
         use12h={prayerSettings?.clock12h !== false}
         onSnooze={snoozePrayer}
         onGoing={goingPrayer}
-        onClose={() => setPrayerDue(null)}
+        onClose={dismissPrayer}
       />
       {distraction && (
         <div className="fixed bottom-5 start-5 z-50 max-w-sm rounded-xl border border-amber-500/40 bg-card p-3.5 shadow-2xl animate-slide-in">

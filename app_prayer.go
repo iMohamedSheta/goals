@@ -158,7 +158,11 @@ func (a *App) PrayerGoing() error {
 	return nil
 }
 
-// notifyPrayerDue fires one OS toast + sound + a frontend modal event.
+// notifyPrayerDue fires one OS toast + azan sound + a frontend modal event.
+// The sound is just the azan (never the generic chime). The modal carries a
+// hadith about prayer from the offline collection (Arabic/English per app
+// language) — instant, no AI round-trip. The main window is never forced
+// open; re-nags keep the alert coming back until the user goes to pray.
 func (a *App) notifyPrayerDue(ev prayer.DueEvent) {
 	cityName := ev.City
 	if c := prayer.FindCity(ev.City); c != nil {
@@ -166,27 +170,38 @@ func (a *App) notifyPrayerDue(ev prayer.DueEvent) {
 	} else if ev.City == "custom" {
 		cityName = "Custom location"
 	}
-	title := fmt.Sprintf("Goals — prayer time (%s)", cityName)
 	clock12, arabic := true, false
+	lang := "en"
 	if a.store != nil {
 		st := prayer.LoadSettings(a.store)
 		clock12 = st.Clock12h
 		if m, err := a.store.GetSettings(); err == nil {
 			if v := strings.TrimSpace(m["app.language"]); strings.ToLower(v) == "ar" {
 				arabic = true
+				lang = "ar"
 			}
 		}
 	}
-	msg := fmt.Sprintf("It is time for prayer (%s, %s).", ev.Key, prayer.FormatClock(ev.Time, clock12, arabic))
+	var title, msg string
+	clock := prayer.FormatClock(ev.Time, clock12, arabic)
+	if arabic {
+		title = fmt.Sprintf("Goals — حان وقت الصلاة (%s)", cityName)
+		msg = fmt.Sprintf("حان وقت صلاة %s (%s). حي على الصلاة.", ev.Key, clock)
+	} else {
+		title = fmt.Sprintf("Goals — prayer time (%s)", cityName)
+		msg = fmt.Sprintf("It is time for %s prayer (%s).", ev.Key, clock)
+	}
 	go func() {
 		_ = beeep.Notify(title, msg, "")
-		alert.Play()
+		alert.PlayAzan()
 	}()
+	hadith, hadithSource := prayer.HadithFor(ev.Key, lang, ev.Time)
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "prayer:due", map[string]any{
 			"key": ev.Key, "city": ev.City, "cityName": cityName,
 			"time": ev.Time.Format("15:04"), "time12": prayer.FormatClock(ev.Time, true, arabic),
 			"clock12h": clock12, "dateTime": ev.Time.Format(time.RFC3339),
+			"lang": lang, "hadith": hadith, "hadithSource": hadithSource, "repeat": ev.Repeat,
 		})
 	}
 }

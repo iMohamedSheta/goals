@@ -132,16 +132,23 @@ func SaveSettings(s *store.Store, st Settings) error {
 }
 
 // DueEvent is fired when a prayer time arrives.
+// Repeat is true for persistence re-nags (user hasn't gone to pray yet) —
+// callers should replay sound + popup but skip one-shot extras (AI hadith).
 type DueEvent struct {
-	Key  string    `json:"key"`
-	City string    `json:"city"`
-	Time time.Time `json:"time"`
+	Key    string    `json:"key"`
+	City   string    `json:"city"`
+	Time   time.Time `json:"time"`
+	Repeat bool      `json:"repeat"`
 }
 
 // graceWindow: only ring within 45 minutes after the time (so opening the app
 // hours later doesn't nag about a long-past prayer).
 const graceWindow = 45 * time.Minute
 const pollEvery = 20 * time.Second
+
+// nagEvery: while the user hasn't marked "I'm going to pray", re-ring this
+// often so the alert persists over whatever they are doing until they pray.
+const nagEvery = 5 * time.Minute
 
 // Reminder polls the clock and fires OnDue when a prayer arrives.
 // OFF by default — only runs after the user enables it in Settings.
@@ -152,8 +159,9 @@ type Reminder struct {
 	running   bool
 	stop      chan struct{}
 	onDue     func(DueEvent)
-	alerted   map[string]bool // "YYYY-MM-DD:key" already rang
-	done      map[string]bool // "YYYY-MM-DD:key" user is going/done
+	alerted   map[string]bool      // "YYYY-MM-DD:key" already rang
+	done      map[string]bool      // "YYYY-MM-DD:key" user is going/done
+	lastNag   map[string]time.Time // "YYYY-MM-DD:key" last ring (for re-nags)
 	snoozeKey string
 	snoozeDay string
 	snoozeAt  time.Time
@@ -162,7 +170,7 @@ type Reminder struct {
 
 // New returns a stopped reminder bound to the store.
 func New(s *store.Store) *Reminder {
-	return &Reminder{store: s, alerted: map[string]bool{}, done: map[string]bool{}}
+	return &Reminder{store: s, alerted: map[string]bool{}, done: map[string]bool{}, lastNag: map[string]time.Time{}}
 }
 
 // SetOnDue registers the alert callback (App wires toast + frontend event).
@@ -246,6 +254,7 @@ func (r *Reminder) check(now time.Time) {
 		r.day = dayKey
 		r.alerted = map[string]bool{}
 		r.done = map[string]bool{}
+		r.lastNag = map[string]time.Time{}
 	}
 	times := ComputeTimes(local, st.Lat, st.Lng, st.TZ, st.Method, st.AsrHanafi).Times
 	// Current prayer = latest alert prayer whose time has passed.
@@ -260,11 +269,17 @@ func (r *Reminder) check(now time.Time) {
 	if current != "" {
 		id := dayKey + ":" + current
 		snoozing := r.snoozeKey == current && r.snoozeDay == dayKey && !r.snoozeAt.IsZero()
-		if !r.done[id] && local.Sub(currentTime) <= graceWindow {
-			if !r.alerted[id] && (!snoozing || !local.Before(r.snoozeAt)) {
+		if !r.done[id] && local.Sub(currentTime) <= graceWindow && (!snoozing || !local.Before(r.snoozeAt)) {
+			if !r.alerted[id] {
 				r.alerted[id] = true
 				r.snoozeAt = time.Time{}
+				r.lastNag[id] = local
 				fire = &DueEvent{Key: current, City: st.City, Time: currentTime}
+			} else if local.Sub(r.lastNag[id]) >= nagEvery {
+				// Persistent nag: user hasn't gone to pray yet — ring again
+				// (azan + popup) so the alert survives over their work.
+				r.lastNag[id] = local
+				fire = &DueEvent{Key: current, City: st.City, Time: currentTime, Repeat: true}
 			}
 		}
 	}
