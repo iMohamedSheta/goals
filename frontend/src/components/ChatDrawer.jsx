@@ -17,7 +17,8 @@ export function ChatDrawer({ t, open, onClose, onTasksChanged }) {
   const [messages, setMessages] = React.useState([]); // {role:'user'|'ai', text}
   const [input, setInput] = React.useState('');
   const [sessionID, setSessionID] = React.useState('');
-  const [model, setModel] = React.useState('');
+  const [model, setModel] = React.useState(''); // user pick ('' = auto/fastest)
+  const [lastModel, setLastModel] = React.useState(''); // actually used last
   const [models, setModels] = React.useState([]);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelQuery, setModelQuery] = React.useState('');
@@ -76,7 +77,8 @@ export function ChatDrawer({ t, open, onClose, onTasksChanged }) {
   if (!open) return null;
 
   const ready = status?.available !== false;
-  const shortModel = model ? model.split('/').pop() : t.aiAuto;
+  const shownModel = model || lastModel;
+  const shortModel = shownModel ? shownModel.split('/').pop() : t.aiAuto;
   const q = modelQuery.trim().toLowerCase();
   const filtered = (models || []).filter((m) => !q || m.toLowerCase().includes(q));
   const showAuto = !q || t.aiAuto.toLowerCase().includes(q) || 'auto'.includes(q);
@@ -91,12 +93,11 @@ export function ChatDrawer({ t, open, onClose, onTasksChanged }) {
     busyRef.current = true;
     setBusy(true);
     try {
-      const res = await AskAI({ prompt, sessionID, model });
-      if (res?.sessionID) setSessionID(res.sessionID);
-      if (!model && res?.model) {
-        setModel(res.model);
-        try { await SetAIModel(res.model); } catch { /* noop */ }
-      }
+      // One-shot commands: every send is independent (no session resume),
+      // so each reply stands alone like turn one always did. The pick stays
+      // untouched (auto keeps adapting to the cached fastest model).
+      const res = await AskAI({ prompt, sessionID: '', model });
+      if (res?.model) setLastModel(res.model);
       setMessages((ms) => [...ms, { role: 'ai', text: res?.reply || '' }]);
       // the assistant may have changed tasks through MCP — refresh the board
       try { await onTasksChanged?.(); } catch { /* noop */ }
@@ -159,7 +160,6 @@ export function ChatDrawer({ t, open, onClose, onTasksChanged }) {
             <h3 className="truncate text-sm font-bold">{t.aiTitle}</h3>
             <p className="truncate text-[11px] text-muted-foreground">
               {status?.version ? `opencode v${status.version}` : t.aiPowered}
-              {sessionID ? ' · ' + t.aiSession : ''}
             </p>
           </div>
           <button

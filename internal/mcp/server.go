@@ -23,9 +23,9 @@ type rpcRequest struct {
 }
 
 type rpcResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string  `json:"jsonrpc"`
+	ID      any     `json:"id"`
+	Result  any     `json:"result,omitempty"`
 	Error   *rpcErr `json:"error,omitempty"`
 }
 
@@ -35,7 +35,10 @@ type rpcErr struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-type toolDef struct {
+// ToolDef is one callable tool: MCP inputSchema doubles as the JSON Schema
+// for direct HTTPS providers (OpenAI function parameters), so both the
+// stdio MCP server and the direct client share definitions and execution.
+type ToolDef struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	InputSchema any    `json:"inputSchema"`
@@ -49,13 +52,13 @@ func strPtr(s string) *string {
 	return &v
 }
 
-func tools() []toolDef {
+func tools() []ToolDef {
 	obj := func(props map[string]any, required []string) map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": required}
 	}
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	boolean := func(desc string) map[string]any { return map[string]any{"type": "boolean", "description": desc} }
-	return []toolDef{
+	return []ToolDef{
 		{Name: "list_tasks", Description: "List goal tasks with optional filters (horizon: short|medium|long|all, status, contextId, focusOnly, search).", InputSchema: obj(map[string]any{
 			"horizon": str("short|medium|long|all (default all)"), "status": str("todo|in_progress|done|blocked|all"),
 			"contextId": str("filter by context id"), "focusOnly": boolean("only focused tasks"), "search": str("search title/description"),
@@ -83,8 +86,8 @@ func tools() []toolDef {
 		{Name: "update_context", Description: "Rename/recolor a context and set its goal: recurrence daily|weekly, dailyTargetSeconds=target per period e.g. 18000 for 5h/day, maxSeconds lifetime estimate, description(s).", InputSchema: obj(map[string]any{
 			"id": str("context id"), "name": str("name"), "color": str("hex color"), "recurrence": str("daily|weekly"),
 			"dailyTargetSeconds": map[string]any{"type": "integer", "description": "target per period in seconds (0 = none)"},
-			"maxSeconds": map[string]any{"type": "integer", "description": "lifetime estimate in seconds (overtime alert)"},
-			"description": str("description"), "descriptionAr": str("arabic description"),
+			"maxSeconds":         map[string]any{"type": "integer", "description": "lifetime estimate in seconds (overtime alert)"},
+			"description":        str("description"), "descriptionAr": str("arabic description"),
 		}, []string{"id"})},
 		{Name: "list_horizons", Description: "List planning horizons (short/medium/long) with their timeline defaults.", InputSchema: obj(map[string]any{}, []string{})},
 		{Name: "update_horizon", Description: "Modify a horizon timeline (e.g. change short from 7 to 14 days).", InputSchema: obj(map[string]any{
@@ -108,6 +111,355 @@ func tools() []toolDef {
 		{Name: "active_context_timer", Description: "Show the currently running context-goal timer, if any.", InputSchema: obj(map[string]any{"day": str("YYYY-MM-DD (default today)")}, []string{})},
 		{Name: "context_time", Description: "Tracked time for a context goal: lifetime total + today's own progress (resets daily) + today's task rollup + lifetime task rollup + history entries.", InputSchema: obj(map[string]any{"id": str("context id"), "day": str("YYYY-MM-DD (default today)")}, []string{"id"})},
 	}
+}
+
+// ToolDefs lists every tool (shared by the stdio server and direct clients).
+func ToolDefs() []ToolDef {
+	return tools()
+}
+
+// Call executes one tool by name with JSON-decoded arguments and returns an
+// MCP content-block payload (textResult/errResult shape). unknown=true means
+// no such tool exists.
+func Call(s *store.Store, name string, args map[string]any) (result any, unknown bool) {
+	getStr := func(k string) string {
+		if v, ok := args[k].(string); ok {
+			return v
+		}
+		return ""
+	}
+	getBool := func(k string) bool {
+		if v, ok := args[k].(bool); ok {
+			return v
+		}
+		return false
+	}
+	getInt := func(k string) int64 {
+		if v, ok := args[k].(float64); ok {
+			return int64(v)
+		}
+		return 0
+	}
+	switch name {
+	case "list_tasks":
+		f := store.TaskFilter{Horizon: getStr("horizon"), Status: getStr("status"), ContextID: getStr("contextId"), Search: getStr("search"), FocusOnly: getBool("focusOnly")}
+		if f.Horizon == "" {
+			f.Horizon = "all"
+		}
+		tasks, err := s.ListTasks(f)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			if tasks == nil {
+				tasks = []store.TaskDetail{}
+			}
+			result = textResult(tasks)
+		}
+	case "focus_list":
+		h := getStr("horizon")
+		if h == "" {
+			h = "all"
+		}
+		tasks, err := s.ListTasks(store.TaskFilter{Horizon: h, FocusOnly: true})
+		if err != nil {
+			result = errResult(err)
+		} else {
+			if tasks == nil {
+				tasks = []store.TaskDetail{}
+			}
+			result = textResult(tasks)
+		}
+	case "get_task":
+		t, err := s.GetTask(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "create_task":
+		in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), ParentID: strPtr(getStr("parentId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
+		t, err := s.CreateTask(in)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "update_task":
+		in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
+		// preserve focus if not provided? bool defaults false â€” acceptable, UI passes explicit.
+		t, err := s.UpdateTask(getStr("id"), in)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "move_task":
+		t, err := s.MoveTask(getStr("id"), getStr("status"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "toggle_focus":
+		t, err := s.ToggleFocus(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "delete_task":
+		if err := s.DeleteTask(getStr("id")); err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(map[string]any{"deleted": getStr("id")})
+		}
+	case "set_parent":
+		t, err := s.SetTaskParent(getStr("id"), strPtr(getStr("parentId")))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "reorder_tasks":
+		var ids []string
+		if v, ok := args["ids"].([]any); ok {
+			for _, x := range v {
+				if str, ok := x.(string); ok {
+					ids = append(ids, str)
+				}
+			}
+		}
+		if err := s.ReorderTasks(ids); err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(map[string]any{"reordered": len(ids)})
+		}
+	case "list_contexts":
+		cs, err := s.ListContexts(getStr("day"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			if cs == nil {
+				cs = []store.Context{}
+			}
+			result = textResult(cs)
+		}
+	case "create_context":
+		c, err := s.CreateContext(getStr("name"), getStr("color"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(c)
+		}
+	case "update_context":
+		id := getStr("id")
+		name := getStr("name")
+		color := getStr("color")
+		daily := getInt("dailyTargetSeconds")
+		max := getInt("maxSeconds")
+		rec := getStr("recurrence")
+		desc := getStr("description")
+		descAr := getStr("descriptionAr")
+		if name == "" || color == "" || daily == 0 || max == 0 || rec == "" || desc == "" || descAr == "" {
+			// fill from existing so partial updates work
+			if cur, err := s.GetContext(id, ""); err == nil {
+				if name == "" {
+					name = cur.Name
+				}
+				if color == "" {
+					color = cur.Color
+				}
+				if _, hasDaily := args["dailyTargetSeconds"]; !hasDaily {
+					daily = cur.DailyTarget
+				}
+				if _, hasMax := args["maxSeconds"]; !hasMax {
+					max = cur.MaxSeconds
+				}
+				if rec == "" {
+					rec = cur.Recurrence
+				}
+				if _, hasDesc := args["description"]; !hasDesc {
+					desc = cur.Description
+				}
+				if _, hasDescAr := args["descriptionAr"]; !hasDescAr {
+					descAr = cur.DescriptionAr
+				}
+			}
+		}
+		uc, err := s.UpdateContext(id, name, color, daily, max, rec, desc, descAr)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(uc)
+		}
+	case "list_horizons":
+		hs, err := s.ListHorizons()
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(hs)
+		}
+	case "update_horizon":
+		label := getStr("label")
+		labelAr := getStr("labelAr")
+		desc := getStr("description")
+		descAr := getStr("descriptionAr")
+		days := 0
+		if v, ok := args["defaultDays"].(float64); ok {
+			days = int(v)
+		}
+		key := getStr("key")
+		if label == "" || days == 0 {
+			// fill from existing so partial updates work
+			if h, err := s.GetHorizon(key); err == nil {
+				if label == "" {
+					label = h.Label
+				}
+				if labelAr == "" {
+					labelAr = h.LabelAr
+				}
+				if days == 0 {
+					days = h.DefaultDays
+				}
+				if desc == "" {
+					desc = h.Description
+				}
+				if descAr == "" {
+					descAr = h.DescriptionAr
+				}
+			}
+		}
+		h, err := s.UpdateHorizon(key, label, labelAr, days, desc, descAr)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(h)
+		}
+	case "create_horizon":
+		days := 30
+		if v, ok := args["defaultDays"].(float64); ok && int(v) > 0 {
+			days = int(v)
+		}
+		h, err := s.CreateHorizon(getStr("label"), getStr("labelAr"), days, getStr("description"), getStr("descriptionAr"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(h)
+		}
+	case "delete_horizon":
+		if err := s.DeleteHorizon(getStr("key")); err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(map[string]any{"deleted": getStr("key")})
+		}
+	case "stats":
+		st, err := s.GetStats()
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(st)
+		}
+	case "start_timer":
+		t, err := s.StartTimer(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "stop_timer":
+		t, err := s.StopTimer(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "finish_task":
+		t, err := s.FinishTask(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(t)
+		}
+	case "active_timer":
+		all, _ := s.GetActiveTimers()
+		if len(all) == 0 {
+			result = textResult(map[string]any{"running": false})
+		} else {
+			elapsed, _, _ := s.Elapsed(all[0].ID)
+			result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "task": all[0], "timers": all})
+		}
+	case "task_time":
+		id := getStr("id")
+		day := getStr("day")
+		t, err := s.GetTask(id)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			elapsed, running, _ := s.Elapsed(id)
+			today, _, _ := s.TaskToday(id, day)
+			entries, _ := s.ListTimeEntries(id)
+			if entries == nil {
+				entries = []store.TimeEntry{}
+			}
+			result = textResult(map[string]any{"task": t.Title, "running": running, "totalSeconds": elapsed, "todaySeconds": today, "today": today, "entries": entries})
+		}
+	case "get_settings":
+		settings, err := s.GetSettings()
+		if err != nil {
+			result = errResult(err)
+		} else {
+			if settings == nil {
+				settings = map[string]string{}
+			}
+			result = textResult(settings)
+		}
+	case "set_setting":
+		if err := s.SetSetting(getStr("key"), getStr("value")); err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(map[string]any{"key": getStr("key"), "value": getStr("value")})
+		}
+	case "start_context_timer":
+		c, err := s.StartContextTimer(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(c)
+		}
+	case "stop_context_timer":
+		c, err := s.StopContextTimer(getStr("id"))
+		if err != nil {
+			result = errResult(err)
+		} else {
+			result = textResult(c)
+		}
+	case "active_context_timer":
+		c, err := s.GetActiveContextTimer(getStr("day"))
+		if err != nil {
+			result = textResult(map[string]any{"running": false})
+		} else {
+			elapsed, _, _ := s.ContextElapsed(c.ID)
+			result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "context": c})
+		}
+	case "context_time":
+		id := getStr("id")
+		day := getStr("day")
+		c, err := s.GetContext(id, day)
+		if err != nil {
+			result = errResult(err)
+		} else {
+			elapsed, running, _ := s.ContextElapsed(id)
+			tasksTotal, _ := s.ContextTasksTotal(id)
+			entries, _ := s.ListContextEntries(id)
+			if entries == nil {
+				entries = []store.ContextTimeEntry{}
+			}
+			result = textResult(map[string]any{"context": c.Name, "running": running, "totalSeconds": elapsed, "todaySeconds": c.TodaySeconds, "dailyTargetSeconds": c.DailyTarget, "recurrence": c.Recurrence, "weekSeconds": c.WeekSeconds, "tasksTodaySeconds": c.TasksTodaySeconds, "tasksTotalSeconds": tasksTotal, "weekTasksSeconds": c.WeekTasksSeconds, "entries": entries})
+		}
+	default:
+		return nil, true
+	}
+	return result, false
 }
 
 func textResult(v any) map[string]any {
@@ -174,7 +526,7 @@ func Run(dbPath string) int {
 			write(req.ID, map[string]any{"tools": names}, nil)
 		case "tools/call":
 			var p struct {
-				Name      string         `json:"name"`
+				Name      string          `json:"name"`
 				Arguments json.RawMessage `json:"arguments"`
 			}
 			_ = json.Unmarshal(req.Params, &p)
@@ -191,345 +543,9 @@ func Run(dbPath string) int {
 			if len(p.Arguments) > 0 {
 				_ = json.Unmarshal(p.Arguments, &args)
 			}
-			getStr := func(k string) string {
-				if v, ok := args[k].(string); ok {
-					return v
-				}
-				return ""
-			}
-			getBool := func(k string) bool {
-				if v, ok := args[k].(bool); ok {
-					return v
-				}
-				return false
-			}
-			getInt := func(k string) int64 {
-				if v, ok := args[k].(float64); ok {
-					return int64(v)
-				}
-				return 0
-			}
-			var result, rerr any
-			switch p.Name {
-			case "list_tasks":
-				f := store.TaskFilter{Horizon: getStr("horizon"), Status: getStr("status"), ContextID: getStr("contextId"), Search: getStr("search"), FocusOnly: getBool("focusOnly")}
-				if f.Horizon == "" {
-					f.Horizon = "all"
-				}
-				tasks, err := s.ListTasks(f)
-				if err != nil {
-					result = errResult(err)
-				} else {
-					if tasks == nil {
-						tasks = []store.TaskDetail{}
-					}
-					result = textResult(tasks)
-				}
-			case "focus_list":
-				h := getStr("horizon")
-				if h == "" {
-					h = "all"
-				}
-				tasks, err := s.ListTasks(store.TaskFilter{Horizon: h, FocusOnly: true})
-				if err != nil {
-					result = errResult(err)
-				} else {
-					if tasks == nil {
-						tasks = []store.TaskDetail{}
-					}
-					result = textResult(tasks)
-				}
-			case "get_task":
-				t, err := s.GetTask(getStr("id"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "create_task":
-				in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), ParentID: strPtr(getStr("parentId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
-				t, err := s.CreateTask(in)
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "update_task":
-				in := store.TaskInput{Title: getStr("title"), Description: getStr("description"), Horizon: getStr("horizon"), Status: getStr("status"), Priority: getStr("priority"), ContextID: strPtr(getStr("contextId")), StartDate: strPtr(getStr("startDate")), DueDate: strPtr(getStr("dueDate")), Focus: getBool("focus"), MaxSeconds: getInt("maxSeconds")}
-				// preserve focus if not provided? bool defaults false — acceptable, UI passes explicit.
-				t, err := s.UpdateTask(getStr("id"), in)
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "move_task":
-				t, err := s.MoveTask(getStr("id"), getStr("status"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "toggle_focus":
-				t, err := s.ToggleFocus(getStr("id"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "delete_task":
-				if err := s.DeleteTask(getStr("id")); err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(map[string]any{"deleted": getStr("id")})
-				}
-			case "set_parent":
-				t, err := s.SetTaskParent(getStr("id"), strPtr(getStr("parentId")))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "reorder_tasks":
-				var ids []string
-				if v, ok := args["ids"].([]any); ok {
-					for _, x := range v {
-						if str, ok := x.(string); ok {
-							ids = append(ids, str)
-						}
-					}
-				}
-				if err := s.ReorderTasks(ids); err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(map[string]any{"reordered": len(ids)})
-				}
-		case "list_contexts":
-			cs, err := s.ListContexts(getStr("day"))
-			if err != nil {
-				result = errResult(err)
-			} else {
-				if cs == nil {
-					cs = []store.Context{}
-				}
-				result = textResult(cs)
-			}
-		case "create_context":
-			c, err := s.CreateContext(getStr("name"), getStr("color"))
-			if err != nil {
-				result = errResult(err)
-			} else {
-				result = textResult(c)
-			}
-		case "update_context":
-			id := getStr("id")
-			name := getStr("name")
-			color := getStr("color")
-			daily := getInt("dailyTargetSeconds")
-			max := getInt("maxSeconds")
-			rec := getStr("recurrence")
-			desc := getStr("description")
-			descAr := getStr("descriptionAr")
-			if name == "" || color == "" || daily == 0 || max == 0 || rec == "" || desc == "" || descAr == "" {
-				// fill from existing so partial updates work
-				if cur, err := s.GetContext(id, ""); err == nil {
-					if name == "" {
-						name = cur.Name
-					}
-					if color == "" {
-						color = cur.Color
-					}
-					if _, hasDaily := args["dailyTargetSeconds"]; !hasDaily {
-						daily = cur.DailyTarget
-					}
-					if _, hasMax := args["maxSeconds"]; !hasMax {
-						max = cur.MaxSeconds
-					}
-					if rec == "" {
-						rec = cur.Recurrence
-					}
-					if _, hasDesc := args["description"]; !hasDesc {
-						desc = cur.Description
-					}
-					if _, hasDescAr := args["descriptionAr"]; !hasDescAr {
-						descAr = cur.DescriptionAr
-					}
-				}
-			}
-			uc, err := s.UpdateContext(id, name, color, daily, max, rec, desc, descAr)
-			if err != nil {
-				result = errResult(err)
-			} else {
-				result = textResult(uc)
-			}
-			case "list_horizons":
-				hs, err := s.ListHorizons()
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(hs)
-				}
-			case "update_horizon":
-				label := getStr("label")
-				labelAr := getStr("labelAr")
-				desc := getStr("description")
-				descAr := getStr("descriptionAr")
-				days := 0
-				if v, ok := args["defaultDays"].(float64); ok {
-					days = int(v)
-				}
-				key := getStr("key")
-				if label == "" || days == 0 {
-					// fill from existing so partial updates work
-					if h, err := s.GetHorizon(key); err == nil {
-						if label == "" {
-							label = h.Label
-						}
-						if labelAr == "" {
-							labelAr = h.LabelAr
-						}
-						if days == 0 {
-							days = h.DefaultDays
-						}
-						if desc == "" {
-							desc = h.Description
-						}
-						if descAr == "" {
-							descAr = h.DescriptionAr
-						}
-					}
-				}
-				h, err := s.UpdateHorizon(key, label, labelAr, days, desc, descAr)
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(h)
-				}
-			case "create_horizon":
-				days := 30
-				if v, ok := args["defaultDays"].(float64); ok && int(v) > 0 {
-					days = int(v)
-				}
-				h, err := s.CreateHorizon(getStr("label"), getStr("labelAr"), days, getStr("description"), getStr("descriptionAr"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(h)
-				}
-			case "delete_horizon":
-				if err := s.DeleteHorizon(getStr("key")); err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(map[string]any{"deleted": getStr("key")})
-				}
-			case "stats":
-				st, err := s.GetStats()
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(st)
-				}
-			case "start_timer":
-				t, err := s.StartTimer(getStr("id"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "stop_timer":
-				t, err := s.StopTimer(getStr("id"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "finish_task":
-				t, err := s.FinishTask(getStr("id"))
-				if err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(t)
-				}
-			case "active_timer":
-				all, _ := s.GetActiveTimers()
-				if len(all) == 0 {
-					result = textResult(map[string]any{"running": false})
-				} else {
-					elapsed, _, _ := s.Elapsed(all[0].ID)
-					result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "task": all[0], "timers": all})
-				}
-			case "task_time":
-				id := getStr("id")
-				day := getStr("day")
-				t, err := s.GetTask(id)
-				if err != nil {
-					result = errResult(err)
-				} else {
-					elapsed, running, _ := s.Elapsed(id)
-					today, _, _ := s.TaskToday(id, day)
-					entries, _ := s.ListTimeEntries(id)
-					if entries == nil {
-						entries = []store.TimeEntry{}
-					}
-					result = textResult(map[string]any{"task": t.Title, "running": running, "totalSeconds": elapsed, "todaySeconds": today, "today": today, "entries": entries})
-				}
-			case "get_settings":				settings, err := s.GetSettings()
-				if err != nil {
-					result = errResult(err)
-				} else {
-					if settings == nil {
-						settings = map[string]string{}
-					}
-					result = textResult(settings)
-				}
-			case "set_setting":
-				if err := s.SetSetting(getStr("key"), getStr("value")); err != nil {
-					result = errResult(err)
-				} else {
-					result = textResult(map[string]any{"key": getStr("key"), "value": getStr("value")})
-				}
-		case "start_context_timer":
-			c, err := s.StartContextTimer(getStr("id"))
-			if err != nil {
-				result = errResult(err)
-			} else {
-				result = textResult(c)
-			}
-		case "stop_context_timer":
-			c, err := s.StopContextTimer(getStr("id"))
-			if err != nil {
-				result = errResult(err)
-			} else {
-				result = textResult(c)
-			}
-		case "active_context_timer":
-			c, err := s.GetActiveContextTimer(getStr("day"))
-			if err != nil {
-				result = textResult(map[string]any{"running": false})
-			} else {
-				elapsed, _, _ := s.ContextElapsed(c.ID)
-				result = textResult(map[string]any{"running": true, "elapsedSeconds": elapsed, "context": c})
-			}
-		case "context_time":
-			id := getStr("id")
-			day := getStr("day")
-			c, err := s.GetContext(id, day)
-			if err != nil {
-				result = errResult(err)
-			} else {
-				elapsed, running, _ := s.ContextElapsed(id)
-				tasksTotal, _ := s.ContextTasksTotal(id)
-				entries, _ := s.ListContextEntries(id)
-				if entries == nil {
-					entries = []store.ContextTimeEntry{}
-				}
-				result = textResult(map[string]any{"context": c.Name, "running": running, "totalSeconds": elapsed, "todaySeconds": c.TodaySeconds, "dailyTargetSeconds": c.DailyTarget, "recurrence": c.Recurrence, "weekSeconds": c.WeekSeconds, "tasksTodaySeconds": c.TasksTodaySeconds, "tasksTotalSeconds": tasksTotal, "weekTasksSeconds": c.WeekTasksSeconds, "entries": entries})
-			}
-			default:
-				rerr = &rpcErr{Code: -32601, Message: "unknown tool: " + p.Name}
-			}
-			if rerr != nil {
-				write(req.ID, nil, rerr.(*rpcErr))
+			result, unknown := Call(s, p.Name, args)
+			if unknown {
+				write(req.ID, nil, &rpcErr{Code: -32601, Message: "unknown tool: " + p.Name})
 			} else {
 				write(req.ID, result, nil)
 			}

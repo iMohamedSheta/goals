@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,14 +14,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"goals/internal/llm"
 )
 
 // Status describes whether the local OpenCode CLI can be used.
+// Direct is true when HTTPS mode (no local process) is available.
 type Status struct {
 	Available     bool   `json:"available"`
 	Binary        string `json:"binary"`
 	Version       string `json:"version"`
 	Authenticated bool   `json:"authenticated"`
+	Direct        bool   `json:"direct"`
 	Hint          string `json:"hint"`
 }
 
@@ -102,17 +107,50 @@ func runCmd(ctx context.Context, bin string, viaShell bool, args []string, dir s
 		cmd = exec.CommandContext(ctx, bin, args...)
 	}
 	hideConsole(cmd)
+	// Never inherit the GUI's stdin: an inherited live console handle lets
+	// the child block forever on an interactive prompt (permission / trust /
+	// auth) with nobody to answer it. NUL reports EOF immediately so it
+	// either proceeds non-interactively or fails fast.
+	null, nullErr := os.Open(os.DevNull)
+	if nullErr == nil {
+		defer null.Close()
+		cmd.Stdin = null
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	if extraEnv != nil {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
-	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
+	// Capture via temp files, never in-memory pipes: if a grandchild
+	// (e.g. goals.exe mcp inheriting stderr) outlives the child, pipe-based
+	// Wait blocks forever — even after kill — wedging the app permanently.
+	// Files have no such wait condition: Wait returns on process exit,
+	// so runCmd below is guaranteed to return.
+	outFile, err := os.CreateTemp("", "goals-ai-out-*.log")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.Remove(outFile.Name())
+	defer outFile.Close()
+	errFile, err := os.CreateTemp("", "goals-ai-err-*.log")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.Remove(errFile.Name())
+	defer errFile.Close()
+	cmd.Stdout = outFile
+	cmd.Stderr = errFile
 	err = cmd.Run()
-	return outBuf.Bytes(), errBuf.Bytes(), err
+	if ctx.Err() != nil && cmd.Process != nil {
+		// CommandContext kills only the direct child (cmd.exe / opencode);
+		// sweep the whole tree so orphaned grandchildren (goals.exe mcp,
+		// ripgrep helpers, …) can't linger holding the DB / CPU.
+		killTree(cmd.Process.Pid)
+	}
+	stdout, _ = os.ReadFile(outFile.Name())
+	stderr, _ = os.ReadFile(errFile.Name())
+	return stdout, stderr, err
 }
 
 // Version returns e.g. "1.18.31" or "" when it can't be determined.
@@ -157,7 +195,7 @@ func Check() Status {
 	if !auth {
 		hint = "No opencode credentials found — run `opencode auth login` once in a terminal."
 	}
-	return Status{Available: true, Binary: bin, Version: v, Authenticated: auth, Hint: hint}
+	return Status{Available: true, Binary: bin, Version: v, Authenticated: auth, Direct: llm.Configured(), Hint: hint}
 }
 
 // Models lists available provider/model names, falling back to DefaultModels.
@@ -252,13 +290,7 @@ func Ask(workDir, exePath string, req AskRequest) (AskResponse, error) {
 	if prompt == "" {
 		return AskResponse{}, fmt.Errorf("prompt is empty")
 	}
-	// "auto" resolves to a known-good default instead of opencode's global
-	// default, which is usually an opencode/* model gated behind the TUI
-	// or a workspace billing method.
-	model := strings.TrimSpace(req.Model)
-	if model == "" {
-		model = DefaultModel
-	}
+	model := resolveModel(req.Model)
 
 	runnerMu.Lock()
 	if runnerBusy {
@@ -277,6 +309,48 @@ func Ask(workDir, exePath string, req AskRequest) (AskResponse, error) {
 		runnerMu.Unlock()
 	}()
 
+	// Direct HTTPS first: no local process, no RAM spike. Falls back to
+	// the CLI when unconfigured, on unknown slugs, or on direct failure.
+	if out, handled, derr := llm.Try(ctx, model, prompt); handled {
+		if derr == nil {
+			return AskResponse{Reply: out, SessionID: "", Model: model}, nil
+		}
+		if ctx.Err() != nil {
+			return AskResponse{}, fmt.Errorf("cancelled")
+		}
+	}
+
+	sid := strings.TrimSpace(req.SessionID)
+	resp, err := runAsk(ctx, workDir, exePath, prompt, sid, model)
+	if err == nil {
+		return resp, nil
+	}
+	// A resumed session can come back clean but silent (stale/corrupt
+	// session state server-side); retry once as a fresh one-shot before
+	// surfacing the failure.
+	if sid != "" && errors.Is(err, errEmptyReply) && ctx.Err() == nil {
+		return runAsk(ctx, workDir, exePath, prompt, "", model)
+	}
+	return AskResponse{}, err
+}
+
+// errEmptyReply marks a clean run that produced no assistant text, so
+// callers can decide to retry (e.g. drop a stale session and go fresh).
+var errEmptyReply = errors.New("opencode returned an empty reply")
+
+// resolveModel maps "auto" (empty) to a known-good default instead of
+// opencode's global default, which is usually an opencode/* model gated
+// behind the TUI or a workspace billing method.
+func resolveModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = DefaultModel
+	}
+	return model
+}
+
+// runAsk executes one `opencode run --format json` call under ctx.
+func runAsk(ctx context.Context, workDir, exePath, prompt, sessionID, model string) (AskResponse, error) {
 	bin, viaShell, err := resolveBinary()
 	if err != nil {
 		return AskResponse{}, err
@@ -286,13 +360,13 @@ func Ask(workDir, exePath string, req AskRequest) (AskResponse, error) {
 	if model != "" {
 		args = append(args, "--model", model)
 	}
-	if sid := strings.TrimSpace(req.SessionID); sid != "" {
+	if sid := strings.TrimSpace(sessionID); sid != "" {
 		args = append(args, "--session", sid, "--continue")
 	}
 	args = append(args, prompt)
 
 	stdout, stderr, err := runCmd(ctx, bin, viaShell, args, workDir, mcpConfigEnv(exePath))
-	reply, sessionID, apiErr := parseRunJSON(stdout)
+	reply, sessionID, apiErr, evtSummary := parseRunJSON(stdout)
 	if ctx.Err() == context.DeadlineExceeded {
 		return AskResponse{}, fmt.Errorf("opencode timed out after %s", runTimeout)
 	}
@@ -320,7 +394,8 @@ func Ask(workDir, exePath string, req AskRequest) (AskResponse, error) {
 		return AskResponse{}, fmt.Errorf("%s", friendlyError(apiErr))
 	}
 	if strings.TrimSpace(reply) == "" {
-		return AskResponse{}, fmt.Errorf("opencode returned an empty reply")
+		return AskResponse{}, fmt.Errorf("%w (%s, %d stdout bytes, %d stderr bytes)",
+			errEmptyReply, evtSummary, len(stdout), len(stderr))
 	}
 	return AskResponse{Reply: strings.TrimSpace(reply), SessionID: sessionID, Model: model}, nil
 }
@@ -357,39 +432,65 @@ type runEvent struct {
 }
 
 // parseRunJSON reads newline-delimited JSON events, concatenating text parts.
-// Returns (reply, sessionID, apiErrorMessage).
-func parseRunJSON(raw []byte) (string, string, string) {
+// Returns (reply, sessionID, apiErrorMessage, eventSummary). Text is accepted
+// from any event carrying a text part (outer types vary across turns), and
+// the summary describes what was actually received so empty replies stay
+// diagnosable instead of cryptic.
+func parseRunJSON(raw []byte) (string, string, string, string) {
 	var sb strings.Builder
 	sessionID := ""
 	apiErr := ""
+	counts := map[string]int{}
+	var order []string
+	bump := func(t string) {
+		if _, ok := counts[t]; !ok {
+			order = append(order, t)
+		}
+		counts[t]++
+	}
+	lines := 0
 	sc := bufio.NewScanner(bytes.NewReader(raw))
-	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 256*1024), 64*1024*1024)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
+		lines++
 		var ev runEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
+			bump("unparseable")
 			continue
 		}
+		typ := ev.Type
+		if typ == "" {
+			typ = "unknown"
+		}
+		bump(typ)
 		if ev.SessionID != "" {
 			sessionID = ev.SessionID
 		}
-		switch ev.Type {
-		case "text":
-			if ev.Part != nil && ev.Part.Text != "" {
-				sb.WriteString(ev.Part.Text)
-			}
-		case "error":
-			if ev.Error != nil {
-				if ev.Error.Data != nil && ev.Error.Data.Message != "" {
-					apiErr = ev.Error.Data.Message
-				} else if ev.Error.Name != "" {
-					apiErr = ev.Error.Name
-				}
+		if ev.Part != nil && ev.Part.Type == "text" && ev.Part.Text != "" {
+			sb.WriteString(ev.Part.Text)
+		}
+		if ev.Type == "error" && ev.Error != nil {
+			if ev.Error.Data != nil && ev.Error.Data.Message != "" {
+				apiErr = ev.Error.Data.Message
+			} else if ev.Error.Name != "" {
+				apiErr = ev.Error.Name
 			}
 		}
 	}
-	return sb.String(), sessionID, apiErr
+	if err := sc.Err(); err != nil {
+		bump("truncated-line")
+	}
+	summary := fmt.Sprintf("%d lines", lines)
+	if len(order) > 0 {
+		parts := make([]string, 0, len(order))
+		for _, t := range order {
+			parts = append(parts, fmt.Sprintf("%s×%d", t, counts[t]))
+		}
+		summary += ": " + strings.Join(parts, ", ")
+	}
+	return sb.String(), sessionID, apiErr, summary
 }

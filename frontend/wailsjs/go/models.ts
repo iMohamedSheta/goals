@@ -66,6 +66,7 @@ export namespace ai {
 	    binary: string;
 	    version: string;
 	    authenticated: boolean;
+	    direct: boolean;
 	    hint: string;
 	
 	    static createFrom(source: any = {}) {
@@ -78,6 +79,7 @@ export namespace ai {
 	        this.binary = source["binary"];
 	        this.version = source["version"];
 	        this.authenticated = source["authenticated"];
+	        this.direct = source["direct"];
 	        this.hint = source["hint"];
 	    }
 	}

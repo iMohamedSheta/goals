@@ -7,13 +7,14 @@ import (
 	"syscall"
 )
 
-// hideConsole keeps child CLI processes (opencode) from flashing a visible
-// console window. SW_HIDE (not CREATE_NO_WINDOW) is deliberate: grandchildren
-// the child spawns (e.g. MCP servers) inherit the same hidden console instead
-// of allocating their own visible one. Stdio pipes keep working untouched.
+// hideConsole keeps child CLI processes (opencode, a bun runtime) from
+// flashing visible console windows. CREATE_NO_WINDOW is deliberate: the
+// child gets no console at all, so grandchildren it spawns (subagents,
+// MCP servers, helpers) inherit "no console" instead of allocating their
+// own visible one. Temp-file stdio keeps working untouched.
 func hideConsole(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags = 0x08000000 // CREATE_NO_WINDOW
 }
