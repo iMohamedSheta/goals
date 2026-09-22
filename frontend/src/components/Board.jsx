@@ -63,6 +63,23 @@ export function LiveTime({ task, elapsed: elapsedProp, max, className, overClass
   );
 }
 
+/** Live goal-period value (Today for daily goals — resets to 00:00 every
+ *  day — or This week for weekly). Ticks while running; anchored so the live
+ *  delta the backend already included in `base` is never double counted. */
+export function useLivePeriod(base, running, timerKey) {
+  const [now, setNow] = React.useState(Date.now());
+  const [anchor, setAnchor] = React.useState({ value: base || 0, at: Date.now() });
+  React.useEffect(() => {
+    setAnchor({ value: base || 0, at: Date.now() });
+  }, [base, timerKey]); // eslint-disable-line
+  React.useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running, timerKey]);
+  return anchor.value + (running ? Math.max(0, Math.floor((now - anchor.at) / 1000)) : 0);
+}
+
 export function dueInfo(task, t) {
   if (!task.dueDate) return null;
   const neutral = 'border-border bg-secondary text-muted-foreground';
@@ -95,10 +112,30 @@ function IconBtn({ title, onClick, className, children }) {
   );
 }
 
-/** Timer row rendered under every card + table row actions. */
+/** Timer row rendered under every card + table row actions.
+ *  Shows today's time (resets daily) + lifetime total (never resets). */
 export function TimerControls({ t, task, onStart, onPause, onFinish, ap }) {
   const running = !!task.timerStartedAt;
-  const hasTime = running || (task.elapsedSeconds || 0) > 0;
+  const totalStored = task.totalSeconds ?? task.elapsedSeconds ?? 0;
+  const todayBase = task.todaySeconds ?? 0;
+  const hasTime = running || totalStored > 0 || todayBase > 0;
+  // Tick today's counter live while running (anchor avoids double counting
+  // the live delta the backend already included in todaySeconds).
+  const [now, setNow] = React.useState(Date.now());
+  const [anchor, setAnchor] = React.useState({ value: todayBase, at: Date.now() });
+  React.useEffect(() => {
+    setAnchor({ value: todayBase, at: Date.now() });
+  }, [todayBase, task.timerStartedAt]); // eslint-disable-line
+  React.useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running, task.timerStartedAt]);
+  const todayShown = anchor.value + (running ? Math.max(0, Math.floor((now - anchor.at) / 1000)) : 0);
+  const todayLabel = t.todayTime || t.todayLabel || 'Today';
+  const totalLabel = t.totalLabel || 'Total';
+  const liveTotal = (task.elapsedSeconds ?? totalStored) + (running ? Math.max(0, Math.floor((now - Date.parse(task.timerStartedAt)) / 1000)) : 0);
+  const over = (task.maxSeconds || 0) > 0 && liveTotal > task.maxSeconds;
   return (
     <div
       className={cn(
@@ -108,13 +145,21 @@ export function TimerControls({ t, task, onStart, onPause, onFinish, ap }) {
         running ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-border/70 bg-muted/30'
       )}
       onClick={(e) => e.stopPropagation()}
+      title={`${todayLabel}: ${formatHMS(todayShown)} · ${totalLabel}: ${formatHMS(totalStored)}`}
     >
       {running ? (
         <span className="pulse-dot ms-1 size-2 shrink-0 rounded-full bg-emerald-400 text-emerald-400" />
       ) : (
         <TimerIcon size={13} className="ms-1 shrink-0 text-muted-foreground" />
       )}
-      <LiveTime task={task} className={cn('text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')} showBadge badgeLabel={t.overtime} />
+      <span className="flex min-w-0 items-baseline gap-1.5" title={`${totalLabel}: ${formatHMS(liveTotal)}${over ? ` · ${t.overtime}` : ''}`}>
+        <span className={cn('tabular text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')}>{formatHMS(todayShown)}</span>
+        {(totalStored > 0 || todayShown > 0 || running) && (
+          <span className={cn('tabular truncate text-[10px] font-medium', over ? 'font-bold text-red-400' : 'text-muted-foreground')}>
+            {totalLabel} {formatHMS(liveTotal)}
+          </span>
+        )}
+      </span>
       <span className="flex-1" />
       {!running ? (
         <IconBtn title={hasTime ? t.resumeTimer : t.startTimer} onClick={() => onStart(task)} className="text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300">
@@ -486,6 +531,39 @@ export function KanbanBoard(props) {
   );
 }
 
+/** List-view time cell: Today is the timer (ticking), Total is small info. */
+function TaskTableTime({ t, task, running, ap, onStart, onPause, onFinish }) {
+  const totalStored = task.totalSeconds ?? task.elapsedSeconds ?? 0;
+  const todayShown = useLivePeriod(task.todaySeconds || 0, running, task.timerStartedAt);
+  const todayLabel = t.todayTime || t.todayLabel || 'Today';
+  const totalLabel = t.totalLabel || 'Total';
+  const [now, setNow] = React.useState(Date.now());
+  React.useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running, task.timerStartedAt]);
+  const liveTotal = (task.elapsedSeconds ?? totalStored) + (running ? Math.max(0, Math.floor((now - Date.parse(task.timerStartedAt)) / 1000)) : 0);
+  const over = (task.maxSeconds || 0) > 0 && liveTotal > task.maxSeconds;
+  return (
+    <span className="flex flex-col leading-none" onClick={(e) => e.stopPropagation()} title={`${todayLabel}: ${formatHMS(todayShown)} · ${totalLabel}: ${formatHMS(liveTotal)}${over ? ` · ${t.overtime}` : ''}`}>
+      <span className="flex items-center gap-1">
+        {running && <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-emerald-400 text-emerald-400" />}
+        <span className={cn('tabular text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')}>{formatHMS(todayShown)}</span>
+        {!running ? (
+          <button title={t.startTimer} onClick={() => onStart(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300', animClass(ap))}><Play size={13} /></button>
+        ) : (
+          <button title={t.pauseTimer} onClick={() => onPause(task)} className={cn('rounded p-1 text-emerald-300 hover:bg-emerald-500/20', animClass(ap))}><Pause size={13} /></button>
+        )}
+        <button title={t.finishTask} onClick={() => onFinish(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-primary/15 hover:text-primary', animClass(ap))}><Check size={13} /></button>
+      </span>
+      {(totalStored > 0 || todayShown > 0 || running) && (
+        <span className={cn('tabular mt-0.5 text-[10px]', over ? 'font-bold text-red-400' : 'text-muted-foreground')}>{totalLabel} {formatHMS(liveTotal)}</span>
+      )}
+    </span>
+  );
+}
+
 export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus, onStart, onPause, onFinish, onTaskMove, onAddSubtask, ap = DEFAULT_APPEARANCE }) {
   const d = density(ap);
   const { roots, childrenMap } = React.useMemo(() => buildTree(tasks || []), [tasks]);
@@ -605,16 +683,7 @@ export function TaskTable({ t, tasks, contextOf, onEdit, onDelete, onToggleFocus
                 {t[task.priority] || task.priority}
               </span>
             </span>
-            <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-              {running && <span className="pulse-dot size-1.5 shrink-0 rounded-full bg-emerald-400 text-emerald-400" />}
-              <LiveTime task={task} className={cn('text-xs font-bold', running ? 'text-emerald-300' : 'text-muted-foreground')} showBadge badgeLabel={t.overtime} />
-              {!running ? (
-                <button title={t.startTimer} onClick={() => onStart(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-emerald-500/15 hover:text-emerald-300', animClass(ap))}><Play size={13} /></button>
-              ) : (
-                <button title={t.pauseTimer} onClick={() => onPause(task)} className={cn('rounded p-1 text-emerald-300 hover:bg-emerald-500/20', animClass(ap))}><Pause size={13} /></button>
-              )}
-              <button title={t.finishTask} onClick={() => onFinish(task)} className={cn('rounded p-1 text-muted-foreground hover:bg-primary/15 hover:text-primary', animClass(ap))}><Check size={13} /></button>
-            </span>
+            <TaskTableTime t={t} task={task} running={running} ap={ap} onStart={onStart} onPause={onPause} onFinish={onFinish} />
             <span className="text-xs tabular">
               {due ? <span className={cn('inline-flex items-center gap-1 border', RADIUS_SM, d.badge, animClass(ap), due.cls)}><CalendarClock size={11} />{due.label}</span> : <span className="text-muted-foreground">—</span>}
             </span>
@@ -658,12 +727,18 @@ export function ViewToggle({ t, view, onChange, ap }) {
   );
 }
 
-/** Header pill shown while a timer runs: live time + pause + mini + finish. */
+/** Header pill shown while a timer runs: Today is the timer (big, ticking),
+ *  lifetime Total is just small info text beside it. */
 export function ActiveTimerPill({ t, active, activeCount, onPause, onResume, onMini, onFinish, ap }) {
   if (!active) return null;
   const running = !!active.timerStartedAt;
+  const todayLabel = t.todayTime || t.todayLabel || 'Today';
+  const totalLabel = t.totalLabel || 'Total';
+  const todayShown = useLivePeriod(active.todaySeconds || 0, running, active.timerStartedAt);
+  const liveTotal = active.elapsed ?? active.totalSeconds ?? 0;
+  const over = (active.maxSeconds || 0) > 0 && liveTotal > active.maxSeconds;
   return (
-    <div className={cn('flex items-center gap-2 border border-emerald-500/40 bg-emerald-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))}>
+    <div className={cn('flex items-center gap-2 border border-emerald-500/40 bg-emerald-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))} title={`${todayLabel}: ${formatHMS(todayShown)} · ${totalLabel}: ${formatHMS(liveTotal)}`}>
       <span className={running ? 'pulse-dot size-2 rounded-full bg-emerald-400 text-emerald-400' : 'size-2 rounded-full bg-amber-400'} />
       <span className="max-w-[180px] truncate text-[13px] font-semibold text-emerald-200">{active.title}</span>
       {(activeCount || 1) > 1 && (
@@ -671,7 +746,10 @@ export function ActiveTimerPill({ t, active, activeCount, onPause, onResume, onM
           +{(activeCount || 1) - 1}
         </span>
       )}
-      <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-[13px] font-bold tabular text-emerald-300" showBadge badgeLabel={t.overtime} />
+      <span className="tabular text-[13px] font-bold text-emerald-300">{formatHMS(todayShown)}</span>
+      <span className={cn('tabular hidden text-[11px] xl:inline', over ? 'font-bold text-red-400' : 'text-emerald-300/70')} title={over ? t.overtime : totalLabel}>
+        {totalLabel} {formatHMS(liveTotal)}
+      </span>
       {running ? (
         <button title={t.pauseTimer} onClick={onPause} className="rounded-md p-1.5 text-emerald-300 hover:bg-emerald-500/20"><Pause size={14} /></button>
       ) : (
@@ -683,26 +761,53 @@ export function ActiveTimerPill({ t, active, activeCount, onPause, onResume, onM
   );
 }
 
-/** Header pill for the running context goal — sits next to the task pill; both may run. */
+/** Header pill for the running context goal — sits next to the task pill; both may run.
+ *  The big number follows the goal period (Today for daily goals — resets to
+ *  00:00 every day — or This week for weekly), ticking live; the lifetime
+ *  total stays visible beside it and in the tooltip. */
 export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
   if (!active) return null;
   const running = !!active.timerStartedAt;
   const weekly = (active.recurrence || 'daily') === 'weekly';
-  const periodValue = weekly ? (active.weekSeconds || 0) : (active.todaySeconds || 0);
+  const periodBase = weekly ? (active.weekSeconds || 0) : (active.todaySeconds || 0);
+  const periodLabel = weekly ? (t.weekLabel || 'Week') : (t.todayTime || t.todayLabel || 'Today');
+  const totalOwn = active.totalSeconds ?? active.elapsedSeconds ?? active.elapsed ?? 0;
+  // Live period tick (anchor avoids double counting the live delta the
+  // backend already included in the period value).
+  const [now, setNow] = React.useState(Date.now());
+  const [anchor, setAnchor] = React.useState({ value: periodBase, at: Date.now() });
+  React.useEffect(() => {
+    setAnchor({ value: periodBase, at: Date.now() });
+  }, [periodBase, active.timerStartedAt]); // eslint-disable-line
+  React.useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running, active.timerStartedAt]);
+  const shown = anchor.value + (running ? Math.max(0, Math.floor((now - anchor.at) / 1000)) : 0);
+  const liveTotal = active.elapsed ?? totalOwn;
+  const over = (active.maxSeconds || 0) > 0 && liveTotal > active.maxSeconds;
   const pct = active.dailyTargetSeconds > 0
-    ? Math.min(100, Math.round((periodValue / active.dailyTargetSeconds) * 100))
+    ? Math.min(100, Math.round((shown / active.dailyTargetSeconds) * 100))
     : 0;
   return (
-    <div className={cn('flex items-center gap-2 border border-violet-500/40 bg-violet-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))}>
+    <div className={cn('flex items-center gap-2 border border-violet-500/40 bg-violet-500/10 py-1 pe-1 ps-3 animate-slide-in', RADIUS, animClass(ap))} title={`${periodLabel}: ${formatHMS(shown)} · ${t.totalLabel || 'Total'}: ${formatHMS(totalOwn)}`}>
       <span className="size-2 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: active.color || '#8b5cf6' }} />
       <span className={running ? 'pulse-dot size-2 rounded-full bg-violet-400 text-violet-400' : 'size-2 rounded-full bg-amber-400'} />
       <span className="max-w-[180px] truncate text-[13px] font-semibold text-violet-200">{active.name}</span>
-      <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-[13px] font-bold tabular text-violet-300" showBadge badgeLabel={t.overtime} />
-      {active.dailyTargetSeconds > 0 && (
+      <span className="tabular text-[13px] font-bold text-violet-300">{formatHMS(shown)}</span>
+      {active.dailyTargetSeconds > 0 ? (
         <span className="tabular hidden text-[11px] text-violet-300/80 xl:inline" title={weekly ? t.weeklyTarget : t.dailyTarget}>
-          {formatHMS(periodValue)}/{formatHMS(active.dailyTargetSeconds)} · {pct}%
+          {periodLabel} {formatHMS(shown)}/{formatHMS(active.dailyTargetSeconds)} · {pct}%
+        </span>
+      ) : (
+        <span className="tabular hidden text-[11px] text-violet-300/80 xl:inline">
+          {periodLabel} {formatHMS(shown)} · {t.totalLabel || 'Total'} {formatHMS(liveTotal)}
         </span>
       )}
+      <span className={cn('tabular hidden text-[11px] font-bold xl:inline', over ? 'text-red-400' : 'text-violet-300/60')} title={`${t.totalLabel || 'Total'}: ${formatHMS(liveTotal)}`}>
+        {formatHMS(liveTotal)}
+      </span>
       {running ? (
         <button title={t.pauseTimer} onClick={onPause} className="rounded-md p-1.5 text-violet-300 hover:bg-violet-500/20"><Pause size={14} /></button>
       ) : (
@@ -716,6 +821,17 @@ export function ActiveContextPill({ t, active, onPause, onResume, ap }) {
 export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, onCollapse, ctx, onPauseCtx, onResumeCtx, lastCtx, onResumeLastCtx }) {
   const showCtx = !!ctx;
   const ctxRunning = !!ctx?.timerStartedAt;
+  const ctxWeekly = (ctx?.recurrence || 'daily') === 'weekly';
+  const ctxPeriodBase = ctx ? (ctxWeekly ? (ctx.weekSeconds || 0) : (ctx.todaySeconds || 0)) : 0;
+  const ctxPeriodLabel = ctxWeekly ? (t.weekLabel || 'Week') : (t.todayTime || t.todayLabel || 'Today');
+  const ctxPeriod = useLivePeriod(ctxPeriodBase, ctxRunning, ctx?.timerStartedAt);
+  const ctxTotal = ctx ? (ctx.elapsed ?? ctx.totalSeconds ?? ctx.elapsedSeconds ?? 0) : 0;
+  const ctxOver = ctx && (ctx.maxSeconds || 0) > 0 && ctxTotal > ctx.maxSeconds;
+  const taskRunning = !!active?.timerStartedAt;
+  const taskToday = useLivePeriod(active?.todaySeconds || 0, taskRunning, active?.timerStartedAt);
+  const taskTodayLabel = t.todayTime || t.todayLabel || 'Today';
+  const taskLiveTotal = active ? (active.elapsed ?? active.totalSeconds ?? 0) : 0;
+  const taskOver = !!active && (active.maxSeconds || 0) > 0 && taskLiveTotal > active.maxSeconds;
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex h-8 shrink-0 select-none items-center border-b px-1" style={{ ['--wails-draggable']: 'drag' }}>
@@ -742,7 +858,10 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
                   </span>
                 </div>
                 <h2 className="line-clamp-2 max-w-full text-[15px] font-bold leading-snug">{active.title}</h2>
-                <LiveTime task={active} elapsed={active.elapsed} max={active.maxSeconds} className="text-4xl font-black tabular tracking-tight text-emerald-300" showBadge badgeLabel={t.overtime} />
+                <span className="tabular text-4xl font-black tracking-tight text-emerald-300">{formatHMS(taskToday)}</span>
+                <span className={cn('tabular text-[11px]', taskOver ? 'font-bold text-red-400' : 'text-muted-foreground')}>
+                  {t.totalLabel || 'Total'} {formatHMS(taskLiveTotal)}{taskOver && <span className="ms-1.5">· {t.overtime}</span>}
+                </span>
                 {active.maxSeconds > 0 && (
                   <span className="tabular text-[11px] text-muted-foreground">{t.maxTime}: {formatHMS(active.maxSeconds)}</span>
                 )}
@@ -763,15 +882,13 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
                   <span className="size-2.5 shrink-0 rounded-full ring-2 ring-white/10" style={{ background: ctx.color || '#8b5cf6' }} />
                   <span className={ctxRunning ? 'pulse-dot size-2.5 rounded-full bg-violet-400 text-violet-400' : 'size-2.5 rounded-full bg-amber-400'} />
                   <span className="max-w-[200px] truncate text-[13px] font-bold">{ctx.name}</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{ctxPeriodLabel}</span>
                 </div>
-                <LiveTime
-                  task={ctx}
-                  elapsed={ctx.elapsed}
-                  max={ctx.maxSeconds}
-                  className={active ? 'text-2xl font-black tabular tracking-tight text-violet-300' : 'text-4xl font-black tabular tracking-tight text-violet-300'}
-                  showBadge
-                  badgeLabel={t.overtime}
-                />
+                <span className={cn('tabular font-black tracking-tight', active ? 'text-2xl' : 'text-4xl', ctxOver ? 'text-red-400' : 'text-violet-300')}>{formatHMS(ctxPeriod)}</span>
+                <span className="tabular text-[11px] text-muted-foreground">
+                  {t.totalLabel || 'Total'} {formatHMS(ctxTotal)}
+                  {ctxOver && <span className="ms-1.5 font-bold text-red-400">{t.overtime}</span>}
+                </span>
                 {ctx.maxSeconds > 0 && (
                   <span className="tabular text-[11px] text-muted-foreground">{t.maxTime}: {formatHMS(ctx.maxSeconds)}</span>
                 )}
@@ -807,21 +924,30 @@ export function MiniTimer({ t, active, onPause, onResume, onFinish, onExpand, on
   );
 }
 
-/** Side-docked mini bar: task and/or context timer rows. Click expands to the side view. */
+/** Side-docked mini bar: task and/or context timer rows. Click expands to the side view.
+ *  The context row follows the goal period (Today for daily — resets 00:00 —
+ *  or This week for weekly), ticking live. */
 export function TimerWidget({ t, active, ctx, lastCtx, onExpand }) {
+  const taskTodayShown = useLivePeriod(active?.todaySeconds || 0, !!active?.timerStartedAt, active?.timerStartedAt);
+  const taskTotal = active ? (active.elapsed ?? active.totalSeconds ?? 0) : 0;
   const taskRow = active && {
+    // Today is the timer; total rides in the tooltip.
     timerStartedAt: active.timerStartedAt,
-    elapsed: active.elapsed,
-    maxSeconds: active.maxSeconds,
-    title: active.title,
+    elapsed: taskTodayShown,
+    maxSeconds: 0,
+    title: `${active.title} · ${t.totalLabel || 'Total'} ${formatHMS(taskTotal)}`,
     violet: false,
   };
+  const ctxWeekly = (ctx?.recurrence || 'daily') === 'weekly';
+  const ctxPeriodBase = ctx ? (ctxWeekly ? (ctx.weekSeconds || 0) : (ctx.todaySeconds || 0)) : 0;
+  const ctxPeriod = useLivePeriod(ctxPeriodBase, !!ctx?.timerStartedAt, ctx?.timerStartedAt);
+  const ctxTotal = ctx ? (ctx.elapsed ?? ctx.totalSeconds ?? ctx.elapsedSeconds ?? 0) : 0;
   const ctxRow = ctx && {
+    // elapsed wins over the live calc inside LiveTime: shows period.
     timerStartedAt: ctx.timerStartedAt,
-    elapsedSeconds: ctx.elapsedSeconds ?? ctx.elapsed,
-    elapsed: ctx.elapsed,
-    maxSeconds: ctx.maxSeconds,
-    title: ctx.name,
+    elapsed: ctxPeriod,
+    maxSeconds: 0,
+    title: `${ctx.name} · ${t.totalLabel || 'Total'} ${formatHMS(ctxTotal)}`,
     violet: true,
   };
   const rows = [taskRow, ctxRow].filter(Boolean);

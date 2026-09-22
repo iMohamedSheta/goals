@@ -141,8 +141,10 @@ export namespace store {
 	    maxSeconds: number;
 	    elapsedSeconds: number;
 	    timerStartedAt?: string;
+	    totalSeconds: number;
 	    todaySeconds: number;
 	    tasksTodaySeconds: number;
+	    tasksTotalSeconds: number;
 	    recurrence: string;
 	    weekSeconds: number;
 	    weekTasksSeconds: number;
@@ -163,8 +165,10 @@ export namespace store {
 	        this.maxSeconds = source["maxSeconds"];
 	        this.elapsedSeconds = source["elapsedSeconds"];
 	        this.timerStartedAt = source["timerStartedAt"];
+	        this.totalSeconds = source["totalSeconds"];
 	        this.todaySeconds = source["todaySeconds"];
 	        this.tasksTodaySeconds = source["tasksTodaySeconds"];
+	        this.tasksTotalSeconds = source["tasksTotalSeconds"];
 	        this.recurrence = source["recurrence"];
 	        this.weekSeconds = source["weekSeconds"];
 	        this.weekTasksSeconds = source["weekTasksSeconds"];
@@ -254,6 +258,8 @@ export namespace store {
 	    contextName?: string;
 	    contextColor?: string;
 	    childCount: number;
+	    todaySeconds: number;
+	    totalSeconds: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TaskDetail(source);
@@ -282,6 +288,8 @@ export namespace store {
 	        this.contextName = source["contextName"];
 	        this.contextColor = source["contextColor"];
 	        this.childCount = source["childCount"];
+	        this.todaySeconds = source["todaySeconds"];
+	        this.totalSeconds = source["totalSeconds"];
 	    }
 	}
 	export class TaskFilter {

@@ -9,7 +9,7 @@ import { Button } from './ui/button';
 import { Sheet, SheetHeader, SheetBody, SheetFooter } from './ui/sheet';
 import { Input, Label, Select } from './ui/form';
 import { ACCENTS, FONTS, surfClass, density, motionClass, RADIUS } from '../lib/appearance';
-import { horizonName } from '../lib/i18n';
+import { horizonName, formatHMS } from '../lib/i18n';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
 
 function Seg({ options, value, onPick }) {
@@ -328,6 +328,8 @@ function ContextsTab({ t, contexts, onCreate, onUpdate, onDelete }) {
         const daily = hm(d.dailyTargetSeconds);
         const max = hm(d.maxSeconds);
         const weekly = (d.recurrence || 'daily') === 'weekly';
+        const periodSecs = weekly ? (d.weekSeconds || 0) : (d.todaySeconds || 0);
+        const totalOwn = d.totalSeconds ?? d.elapsedSeconds ?? 0;
         return (
           <div key={d.id} className="space-y-3 rounded-xl border bg-card/40 p-3.5">
             <div className="flex items-center gap-2.5">
@@ -341,6 +343,10 @@ function ContextsTab({ t, contexts, onCreate, onUpdate, onDelete }) {
                 <Trash2 size={15} />
               </Button>
             </div>
+            <p className="tabular text-[11px] leading-relaxed text-muted-foreground">
+              {weekly ? t.weekLabel : (t.todayTime || t.todayLabel)}: {formatHMS(periodSecs)}
+              {' · '}{t.totalLabel || 'Total'}: {formatHMS(totalOwn)}
+            </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label={t.descEn}>
                 <Input value={d.description || ''} onChange={(e) => set(d.id, 'description', e.target.value)} dir="ltr" placeholder="e.g. Deep work & clients" />

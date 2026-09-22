@@ -98,8 +98,16 @@ export function GetContext(arg1, arg2) {
   return window['go']['main']['App']['GetContext'](arg1, arg2);
 }
 
+export function GetContextTasksTotal(arg1) {
+  return window['go']['main']['App']['GetContextTasksTotal'](arg1);
+}
+
 export function GetContextToday(arg1, arg2) {
   return window['go']['main']['App']['GetContextToday'](arg1, arg2);
+}
+
+export function GetContextTotal(arg1) {
+  return window['go']['main']['App']['GetContextTotal'](arg1);
 }
 
 export function GetDBPath() {
@@ -124,6 +132,14 @@ export function GetStats() {
 
 export function GetTask(arg1) {
   return window['go']['main']['App']['GetTask'](arg1);
+}
+
+export function GetTaskToday(arg1, arg2) {
+  return window['go']['main']['App']['GetTaskToday'](arg1, arg2);
+}
+
+export function GetTaskTotal(arg1) {
+  return window['go']['main']['App']['GetTaskTotal'](arg1);
 }
 
 export function GetVersion() {

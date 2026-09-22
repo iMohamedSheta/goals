@@ -53,7 +53,11 @@ export function GetActiveTimers():Promise<Array<store.TaskDetail>>;
 
 export function GetContext(arg1:string,arg2:string):Promise<store.Context>;
 
+export function GetContextTasksTotal(arg1:string):Promise<number>;
+
 export function GetContextToday(arg1:string,arg2:string):Promise<number>;
+
+export function GetContextTotal(arg1:string):Promise<number>;
 
 export function GetDBPath():Promise<string>;
 
@@ -66,6 +70,10 @@ export function GetSettings():Promise<Record<string, string>>;
 export function GetStats():Promise<store.Stats>;
 
 export function GetTask(arg1:string):Promise<store.TaskDetail>;
+
+export function GetTaskToday(arg1:string,arg2:string):Promise<number>;
+
+export function GetTaskTotal(arg1:string):Promise<number>;
 
 export function GetVersion():Promise<string>;
 

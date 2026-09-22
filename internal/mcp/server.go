@@ -100,13 +100,13 @@ func tools() []toolDef {
 		{Name: "stop_timer", Description: "Pause the time tracker on a task and save the segment.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "finish_task", Description: "Stop the timer (saving tracked time) and mark the task done, recording completion time.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
 		{Name: "active_timer", Description: "Show the currently running timer, if any.", InputSchema: obj(map[string]any{}, []string{})},
-		{Name: "task_time", Description: "Tracked time for a task: total seconds + history entries.", InputSchema: obj(map[string]any{"id": str("task id")}, []string{"id"})},
+		{Name: "task_time", Description: "Tracked time for a task: lifetime total (never resets) + today's seconds (resets daily) + history entries.", InputSchema: obj(map[string]any{"id": str("task id"), "day": str("YYYY-MM-DD (default today)")}, []string{"id"})},
 		{Name: "get_settings", Description: "Read app settings (appearance: theme, accent, font, radius, density, ...).", InputSchema: obj(map[string]any{}, []string{})},
 		{Name: "set_setting", Description: "Change an app setting, e.g. appearance.theme=light, appearance.accent=emerald.", InputSchema: obj(map[string]any{"key": str("setting key"), "value": str("setting value")}, []string{"key", "value"})},
 		{Name: "start_context_timer", Description: "Start the time tracker on a context goal (runs in parallel with any task timer; auto-pauses any other context timer).", InputSchema: obj(map[string]any{"id": str("context id")}, []string{"id"})},
 		{Name: "stop_context_timer", Description: "Pause the time tracker on a context goal and save the segment.", InputSchema: obj(map[string]any{"id": str("context id")}, []string{"id"})},
 		{Name: "active_context_timer", Description: "Show the currently running context-goal timer, if any.", InputSchema: obj(map[string]any{"day": str("YYYY-MM-DD (default today)")}, []string{})},
-		{Name: "context_time", Description: "Tracked time for a context goal: lifetime total + today's own progress + today's task rollup + history entries.", InputSchema: obj(map[string]any{"id": str("context id"), "day": str("YYYY-MM-DD (default today)")}, []string{"id"})},
+		{Name: "context_time", Description: "Tracked time for a context goal: lifetime total + today's own progress (resets daily) + today's task rollup + lifetime task rollup + history entries.", InputSchema: obj(map[string]any{"id": str("context id"), "day": str("YYYY-MM-DD (default today)")}, []string{"id"})},
 	}
 }
 
@@ -460,16 +460,18 @@ func Run(dbPath string) int {
 				}
 			case "task_time":
 				id := getStr("id")
+				day := getStr("day")
 				t, err := s.GetTask(id)
 				if err != nil {
 					result = errResult(err)
 				} else {
 					elapsed, running, _ := s.Elapsed(id)
+					today, _, _ := s.TaskToday(id, day)
 					entries, _ := s.ListTimeEntries(id)
 					if entries == nil {
 						entries = []store.TimeEntry{}
 					}
-					result = textResult(map[string]any{"task": t.Title, "running": running, "totalSeconds": elapsed, "entries": entries})
+					result = textResult(map[string]any{"task": t.Title, "running": running, "totalSeconds": elapsed, "todaySeconds": today, "today": today, "entries": entries})
 				}
 			case "get_settings":				settings, err := s.GetSettings()
 				if err != nil {
@@ -516,11 +518,12 @@ func Run(dbPath string) int {
 				result = errResult(err)
 			} else {
 				elapsed, running, _ := s.ContextElapsed(id)
+				tasksTotal, _ := s.ContextTasksTotal(id)
 				entries, _ := s.ListContextEntries(id)
 				if entries == nil {
 					entries = []store.ContextTimeEntry{}
 				}
-				result = textResult(map[string]any{"context": c.Name, "running": running, "totalSeconds": elapsed, "todaySeconds": c.TodaySeconds, "dailyTargetSeconds": c.DailyTarget, "recurrence": c.Recurrence, "weekSeconds": c.WeekSeconds, "tasksTodaySeconds": c.TasksTodaySeconds, "weekTasksSeconds": c.WeekTasksSeconds, "entries": entries})
+				result = textResult(map[string]any{"context": c.Name, "running": running, "totalSeconds": elapsed, "todaySeconds": c.TodaySeconds, "dailyTargetSeconds": c.DailyTarget, "recurrence": c.Recurrence, "weekSeconds": c.WeekSeconds, "tasksTodaySeconds": c.TasksTodaySeconds, "tasksTotalSeconds": tasksTotal, "weekTasksSeconds": c.WeekTasksSeconds, "entries": entries})
 			}
 			default:
 				rerr = &rpcErr{Code: -32601, Message: "unknown tool: " + p.Name}

@@ -21,9 +21,10 @@ function ContextGoalRow({ t, lang, c, selected, onFilter, onStart, onPause }) {
   const target = c.dailyTargetSeconds || 0;
   const weekly = (c.recurrence || 'daily') === 'weekly';
   const periodBase = weekly ? (c.weekSeconds || 0) : (c.todaySeconds || 0);
-  const periodRollup = weekly ? (c.weekTasksSeconds || 0) : (c.tasksTodaySeconds || 0);
   const periodLabel = weekly ? t.weekLabel : t.todayLabel;
   const periodDoneLabel = weekly ? t.weekDone : t.dailyDone;
+  const totalOwn = c.totalSeconds ?? c.elapsedSeconds ?? 0;
+  const todayOwn = c.todaySeconds || 0;
   const desc = lang === 'ar' ? (c.descriptionAr || c.description) : (c.description || c.descriptionAr);
   // Period progress ticks live while running: anchor on the last fetched value
   // and add only the seconds elapsed since that fetch (avoids double counting
@@ -41,8 +42,9 @@ function ContextGoalRow({ t, lang, c, selected, onFilter, onStart, onPause }) {
   const shown = anchor.value + (running ? Math.max(0, Math.floor((now - anchor.at) / 1000)) : 0);
   const pct = target > 0 ? Math.min(100, Math.round((shown / target) * 100)) : 0;
   const done = target > 0 && shown >= target;
-  const showTotal = running || (c.elapsedSeconds || 0) > 0;
+  const showTotal = running || totalOwn > 0;
   const stop = (e) => { e.stopPropagation(); };
+  const totalTitle = `${t.todayTime || t.todayLabel}: ${formatHMS(todayOwn)} · ${t.totalLabel || 'Total'}: ${formatHMS(totalOwn)}`;
   return (
     // Whole card is the filter target — click anywhere except the timer button.
     <div
@@ -70,7 +72,8 @@ function ContextGoalRow({ t, lang, c, selected, onFilter, onStart, onPause }) {
               <span className={cn('font-bold', done ? 'text-emerald-400' : 'text-violet-300/90')}>{done ? periodDoneLabel : `${pct}%`}</span>
             </span>
           ) : showTotal ? (
-            <span className="tabular mt-1 block text-[11px] leading-none">
+            <span className="tabular mt-1 block truncate text-[11px] leading-none text-muted-foreground" title={totalTitle}>
+              {t.todayTime || t.todayLabel}: {formatHMS(todayOwn)} · {t.totalLabel || 'Total'}:{' '}
               <LiveTime task={c} className={cn('font-bold', running ? 'text-violet-300' : 'text-muted-foreground')} />
             </span>
           ) : null}
@@ -91,9 +94,9 @@ function ContextGoalRow({ t, lang, c, selected, onFilter, onStart, onPause }) {
       {target > 0 && (
         <div className="px-3 pb-2.5 pt-1.5">
           <Progress value={pct} />
-          {periodRollup > 0 && (
-            <p className="tabular mt-1.5 text-[11px] leading-none text-muted-foreground">
-              +{formatHMS(periodRollup)} {t.fromTasks}
+          {showTotal && (
+            <p className="tabular mt-1.5 text-[11px] leading-none text-muted-foreground" title={totalTitle}>
+              {t.totalLabel || 'Total'}: {formatHMS(totalOwn)}
             </p>
           )}
         </div>

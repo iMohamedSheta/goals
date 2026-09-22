@@ -31,8 +31,16 @@ type Context struct {
 	MaxSeconds        int64   `json:"maxSeconds"`
 	ElapsedSecs       int64   `json:"elapsedSeconds"`
 	TimerStarted      *string `json:"timerStartedAt"`
-	TodaySeconds      int64   `json:"todaySeconds"`
-	TasksTodaySeconds int64   `json:"tasksTodaySeconds"`
+	// TotalSeconds is the lifetime own-timer total (stored + live running
+	// delta). elapsedSeconds is kept for compat (stored only); prefer
+	// totalSeconds which already includes the live tick.
+	TotalSeconds      int64 `json:"totalSeconds"`
+	TodaySeconds      int64 `json:"todaySeconds"`
+	TasksTodaySeconds int64 `json:"tasksTodaySeconds"`
+	// TasksTotalSeconds is the lifetime rollup of task time inside this
+	// context (all time_entries + live running task deltas). It never
+	// resets; Today/Week reset every day/window automatically.
+	TasksTotalSeconds int64 `json:"tasksTotalSeconds"`
 	// Recurrence is the goal period: "daily" or "weekly" (rolling 7 days).
 	// WeekSeconds/WeekTasksSeconds mirror the day fields over that window.
 	Recurrence       string `json:"recurrence"`
@@ -92,6 +100,12 @@ type TaskDetail struct {
 	ContextName  *string `json:"contextName"`
 	ContextColor *string `json:"contextColor"`
 	ChildCount   int     `json:"childCount"`
+	// TodaySeconds resets every day (UTC date of started_at): stored day
+	// segments + the live running portion belonging to today. TotalSeconds
+	// is the lifetime total (stored elapsed + full live delta) and never
+	// resets — it is saved on every stop/checkpoint.
+	TodaySeconds int64 `json:"todaySeconds"`
+	TotalSeconds int64 `json:"totalSeconds"`
 }
 
 type TaskFilter struct {
@@ -482,12 +496,88 @@ func (s *Store) fillContextDay(c *Context, day string) {
 	if c.TimerStarted != nil {
 		ts = *c.TimerStarted
 	}
+	now := time.Now().UTC()
+	// Lifetime own-timer total (stored + live) — never resets, always saved
+	// on stop/checkpoint via elapsed_seconds.
+	c.TotalSeconds = c.ElapsedSecs + liveFullDelta(ts, now)
 	today, _ := s.contextOwnDaySum(c.ID, ts, day)
 	c.TodaySeconds = today
 	c.TasksTodaySeconds = s.contextDaySum(c.ID, day)
+	c.TasksTotalSeconds = s.contextTasksTotal(c.ID)
 	week, _ := s.contextOwnWeekSum(c.ID, ts, day)
 	c.WeekSeconds = week
 	c.WeekTasksSeconds = s.contextWeekSum(c.ID, day)
+}
+
+// liveFullDelta is the full running delta for a timerStartedAt value.
+func liveFullDelta(timerStarted string, now time.Time) int64 {
+	if strings.TrimSpace(timerStarted) == "" {
+		return 0
+	}
+	start, err := time.Parse(time.RFC3339, timerStarted)
+	if err != nil {
+		return 0
+	}
+	if d := int64(now.Sub(start).Seconds()); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// liveDayPortion returns only the running seconds belonging to `day`
+// (YYYY-MM-DD, UTC). A timer started yesterday and still running today only
+// contributes seconds since midnight — so the daily counter resets cleanly.
+func liveDayPortion(timerStarted, day string, now time.Time) int64 {
+	if strings.TrimSpace(timerStarted) == "" {
+		return 0
+	}
+	start, err := time.Parse(time.RFC3339, timerStarted)
+	if err != nil {
+		return 0
+	}
+	d, err := time.Parse("2006-01-02", normDay(day))
+	if err != nil {
+		d = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}
+	dayStart := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	s := start
+	if s.Before(dayStart) {
+		s = dayStart
+	}
+	e := now
+	if e.After(dayEnd) {
+		e = dayEnd
+	}
+	if e.Before(s) {
+		return 0
+	}
+	return int64(e.Sub(s).Seconds())
+}
+
+// liveWeekPortion mirrors liveDayPortion over the rolling 7-day window
+// [weekStart(day) 00:00, now].
+func liveWeekPortion(timerStarted, day string, now time.Time) int64 {
+	if strings.TrimSpace(timerStarted) == "" {
+		return 0
+	}
+	start, err := time.Parse(time.RFC3339, timerStarted)
+	if err != nil {
+		return 0
+	}
+	ws, err := time.Parse("2006-01-02", weekStart(normDay(day)))
+	if err != nil {
+		return liveFullDelta(timerStarted, now)
+	}
+	weekBegin := time.Date(ws.Year(), ws.Month(), ws.Day(), 0, 0, 0, 0, time.UTC)
+	s := start
+	if s.Before(weekBegin) {
+		s = weekBegin
+	}
+	if now.Before(s) {
+		return 0
+	}
+	return int64(now.Sub(s).Seconds())
 }
 
 // weekStart returns the UTC date 6 days before day (rolling 7-day window).
@@ -509,26 +599,92 @@ func (s *Store) contextOwnWeekSum(id, timerStarted string, day string) (int64, b
 	}
 	running := strings.TrimSpace(timerStarted) != ""
 	if running {
-		if start, err := time.Parse(time.RFC3339, timerStarted); err == nil {
-			if d := int64(time.Since(start).Seconds()); d > 0 {
-				total += d
-			}
-		}
+		total += liveWeekPortion(timerStarted, day, time.Now().UTC())
 	}
 	return total, running
 }
 
 // contextWeekSum mirrors contextDaySum over the rolling 7-day window.
+// Live running task deltas in this context are included (week portion).
 func (s *Store) contextWeekSum(ctxID, day string) int64 {
 	if strings.TrimSpace(ctxID) == "" {
 		return 0
 	}
 	var sum sql.NullInt64
 	_ = s.db.QueryRow(`SELECT COALESCE(SUM(e.seconds),0) FROM time_entries e JOIN tasks t ON t.id=e.task_id WHERE t.context_id=? AND substr(e.started_at,1,10)>=?`, ctxID, weekStart(day)).Scan(&sum)
+	total := int64(0)
 	if sum.Valid {
-		return sum.Int64
+		total = sum.Int64
 	}
-	return 0
+	total += s.runningTasksWeekPortion(ctxID, day)
+	return total
+}
+
+// contextTasksTotal is the lifetime rollup of task time inside a context:
+// all stored segments + full live deltas of currently running tasks there.
+// It never resets — the daily/weekly fields reset, this one accumulates.
+func (s *Store) contextTasksTotal(ctxID string) int64 {
+	if strings.TrimSpace(ctxID) == "" {
+		return 0
+	}
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(e.seconds),0) FROM time_entries e JOIN tasks t ON t.id=e.task_id WHERE t.context_id=?`, ctxID).Scan(&sum)
+	total := int64(0)
+	if sum.Valid {
+		total = sum.Int64
+	}
+	rows, err := s.db.Query(`SELECT timer_started_at FROM tasks WHERE context_id=? AND timer_started_at IS NOT NULL`, ctxID)
+	if err != nil {
+		return total
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			continue
+		}
+		total += liveFullDelta(ts, now)
+	}
+	return total
+}
+
+// runningTasksDayPortion sums live today-portions of running tasks in a context.
+func (s *Store) runningTasksDayPortion(ctxID, day string) int64 {
+	rows, err := s.db.Query(`SELECT timer_started_at FROM tasks WHERE context_id=? AND timer_started_at IS NOT NULL`, ctxID)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	var total int64
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			continue
+		}
+		total += liveDayPortion(ts, day, now)
+	}
+	return total
+}
+
+// runningTasksWeekPortion sums live week-portions of running tasks in a context.
+func (s *Store) runningTasksWeekPortion(ctxID, day string) int64 {
+	rows, err := s.db.Query(`SELECT timer_started_at FROM tasks WHERE context_id=? AND timer_started_at IS NOT NULL`, ctxID)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	var total int64
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			continue
+		}
+		total += liveWeekPortion(ts, day, now)
+	}
+	return total
 }
 
 // ListContexts returns all contexts with per-day goal progress attached.
@@ -817,6 +973,70 @@ func scanTaskDetail(rows *sql.Rows) (TaskDetail, error) {
 const taskDetailSelect = `SELECT t.id,t.title,t.description,t.horizon,t.status,t.context_id,t.parent_id,t.priority,t.start_date,t.due_date,t.focus,t.sort_order,t.elapsed_seconds,t.timer_started_at,t.max_seconds,t.created_at,t.updated_at,t.completed_at,c.name,c.color,(SELECT COUNT(*) FROM tasks ch WHERE ch.parent_id=t.id)
 	FROM tasks t LEFT JOIN contexts c ON c.id=t.context_id`
 
+// ---------- Task time: daily (resets) + total (never resets) ----------
+
+// taskDaySum sums stored task segments for one calendar day (UTC date prefix
+// of started_at). Live running time is added by the caller via liveDayPortion.
+func (s *Store) taskDaySum(taskID, day string) int64 {
+	var sum sql.NullInt64
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM time_entries WHERE task_id=? AND substr(started_at,1,10)=?`, taskID, day).Scan(&sum)
+	if sum.Valid {
+		return sum.Int64
+	}
+	return 0
+}
+
+// fillTaskTime attaches TodaySeconds (resets every day) and TotalSeconds
+// (lifetime total, stored + live) to a task detail. Both are derived from
+// saved segments so they survive restarts; the timer itself never needs a
+// manual reset — TodaySeconds is recomputed per calendar day.
+func (s *Store) fillTaskTime(t *TaskDetail, day string) {
+	day = normDay(day)
+	now := time.Now().UTC()
+	ts := ""
+	if t.TimerStarted != nil {
+		ts = *t.TimerStarted
+	}
+	t.TotalSeconds = t.ElapsedSecs + liveFullDelta(ts, now)
+	t.TodaySeconds = s.taskDaySum(t.ID, day) + liveDayPortion(ts, day, now)
+}
+
+// TaskToday returns today's tracked seconds for a task (resets daily).
+func (s *Store) TaskToday(id, day string) (int64, bool, error) {
+	day = normDay(day)
+	var stored int64
+	var tstarted sql.NullString
+	if err := s.db.QueryRow(`SELECT elapsed_seconds, timer_started_at FROM tasks WHERE id=?`, id).Scan(&stored, &tstarted); err != nil {
+		return 0, false, err
+	}
+	ts := ""
+	running := false
+	if tstarted.Valid {
+		ts = tstarted.String
+		running = strings.TrimSpace(ts) != ""
+	}
+	total := s.taskDaySum(id, day) + liveDayPortion(ts, day, time.Now().UTC())
+	return total, running, nil
+}
+
+// TaskTotal returns the lifetime total for a task (never resets).
+func (s *Store) TaskTotal(id string) (int64, bool, error) {
+	return s.Elapsed(id)
+}
+
+// ContextTotal returns the lifetime own-timer total for a context.
+func (s *Store) ContextTotal(id string) (int64, bool, error) {
+	return s.ContextElapsed(id)
+}
+
+// ContextTasksTotal returns the lifetime task rollup inside a context.
+func (s *Store) ContextTasksTotal(id string) (int64, error) {
+	if _, err := s.GetContext(id, ""); err != nil {
+		return 0, err
+	}
+	return s.contextTasksTotal(id), nil
+}
+
 func (s *Store) ListTasks(f TaskFilter) ([]TaskDetail, error) {
 	conds := []string{}
 	args := []any{}
@@ -849,16 +1069,26 @@ func (s *Store) ListTasks(f TaskFilter) ([]TaskDetail, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []TaskDetail{}
 	for rows.Next() {
 		t, err := scanTaskDetail(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	// Enrich after close (single-connection pool): daily + total per task.
+	day := time.Now().UTC().Format("2006-01-02")
+	for i := range out {
+		s.fillTaskTime(&out[i], day)
+	}
+	return out, nil
 }
 
 func (s *Store) GetTask(id string) (TaskDetail, error) {
@@ -905,6 +1135,7 @@ func (s *Store) GetTask(id string) (TaskDetail, error) {
 		t.ContextColor = &v
 	}
 	t.Focus = focus == 1
+	s.fillTaskTime(&t, time.Now().UTC().Format("2006-01-02"))
 	return t, nil
 }
 
@@ -1572,6 +1803,7 @@ func (s *Store) GetActiveTimer() (TaskDetail, error) {
 		t.ContextColor = &v
 	}
 	t.Focus = focus == 1
+	s.fillTaskTime(&t, time.Now().UTC().Format("2006-01-02"))
 	return t, nil
 }
 
@@ -1582,16 +1814,25 @@ func (s *Store) GetActiveTimers() ([]TaskDetail, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []TaskDetail{}
 	for rows.Next() {
 		t, err := scanTaskDetail(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	day := time.Now().UTC().Format("2006-01-02")
+	for i := range out {
+		s.fillTaskTime(&out[i], day)
+	}
+	return out, nil
 }
 
 func (s *Store) ListTimeEntries(taskID string) ([]TimeEntry, error) {
@@ -1633,7 +1874,8 @@ func normDay(s string) string {
 }
 
 // contextOwnDaySum sums stored context entry seconds for one calendar day
-// (by UTC date prefix of started_at) plus the live running delta, if any.
+// (by UTC date prefix of started_at) plus the live running portion that
+// belongs to that day — so the daily counter resets every day.
 func (s *Store) contextOwnDaySum(id, timerStarted string, day string) (int64, bool) {
 	var sum sql.NullInt64
 	_ = s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM context_time_entries WHERE context_id=? AND substr(started_at,1,10)=?`, id, day).Scan(&sum)
@@ -1643,26 +1885,26 @@ func (s *Store) contextOwnDaySum(id, timerStarted string, day string) (int64, bo
 	}
 	running := strings.TrimSpace(timerStarted) != ""
 	if running {
-		if start, err := time.Parse(time.RFC3339, timerStarted); err == nil {
-			if d := int64(time.Since(start).Seconds()); d > 0 {
-				total += d
-			}
-		}
+		total += liveDayPortion(timerStarted, day, time.Now().UTC())
 	}
 	return total, running
 }
 
-// contextDaySum sums task time entries for today whose task sits in ctxID.
+// contextDaySum sums task time entries for one day whose task sits in ctxID,
+// plus live running task portions for that day (so the daily rollup ticks
+// live and resets the next day).
 func (s *Store) contextDaySum(ctxID, day string) int64 {
 	if strings.TrimSpace(ctxID) == "" {
 		return 0
 	}
 	var sum sql.NullInt64
 	_ = s.db.QueryRow(`SELECT COALESCE(SUM(e.seconds),0) FROM time_entries e JOIN tasks t ON t.id=e.task_id WHERE t.context_id=? AND substr(e.started_at,1,10)=?`, ctxID, day).Scan(&sum)
+	total := int64(0)
 	if sum.Valid {
-		return sum.Int64
+		total = sum.Int64
 	}
-	return 0
+	total += s.runningTasksDayPortion(ctxID, day)
+	return total
 }
 
 // ---------- Context timer (independent from the task timer; both may run) ----------

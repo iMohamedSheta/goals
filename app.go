@@ -324,6 +324,29 @@ func (a *App) GetContextToday(id string, day string) (int64, error) {
 	return total, err
 }
 
+// GetTaskToday returns today's tracked seconds for a task (resets daily).
+func (a *App) GetTaskToday(id string, day string) (int64, error) {
+	total, _, err := a.store.TaskToday(id, day)
+	return total, err
+}
+
+// GetTaskTotal returns the lifetime total for a task (never resets).
+func (a *App) GetTaskTotal(id string) (int64, error) {
+	total, _, err := a.store.TaskTotal(id)
+	return total, err
+}
+
+// GetContextTotal returns the lifetime own-timer total for a context.
+func (a *App) GetContextTotal(id string) (int64, error) {
+	total, _, err := a.store.ContextTotal(id)
+	return total, err
+}
+
+// GetContextTasksTotal returns the lifetime task rollup inside a context.
+func (a *App) GetContextTasksTotal(id string) (int64, error) {
+	return a.store.ContextTasksTotal(id)
+}
+
 func (a *App) GetSettings() (map[string]string, error) {
 	return a.store.GetSettings()
 }

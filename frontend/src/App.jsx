@@ -117,7 +117,7 @@ export default function App() {
         if (Array.isArray(all) && all.length > 0) count = all.length;
       } catch { /* single-timer fallback */ }
       setActiveCount(count);
-      setActive({ id: a.id, title: a.title, elapsed: liveElapsed(a, Date.now()), timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0 });
+      setActive({ id: a.id, title: a.title, elapsed: liveElapsed(a, Date.now()), timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0, todaySeconds: a.todaySeconds || 0, totalSeconds: a.totalSeconds ?? a.elapsedSeconds ?? 0 });
     } catch {
       setActive(null);
       setActiveCount(1);
@@ -137,9 +137,11 @@ export default function App() {
         id: a.id, name: a.name, color: a.color,
         elapsed: liveElapsed({ elapsedSeconds: a.elapsedSeconds, timerStartedAt: a.timerStartedAt }, Date.now()),
         elapsedSeconds: a.elapsedSeconds || 0,
+        totalSeconds: a.totalSeconds ?? a.elapsedSeconds ?? 0,
         timerStartedAt: a.timerStartedAt, maxSeconds: a.maxSeconds || 0,
         dailyTargetSeconds: a.dailyTargetSeconds || 0, recurrence: a.recurrence || 'daily',
         todaySeconds: a.todaySeconds || 0, weekSeconds: a.weekSeconds || 0,
+        tasksTodaySeconds: a.tasksTodaySeconds || 0, tasksTotalSeconds: a.tasksTotalSeconds || 0,
       });
       lastCtxRef.current = { id: a.id, name: a.name, color: a.color };
     } catch {
@@ -251,6 +253,8 @@ export default function App() {
         elapsed: payload.elapsed,
         timerStartedAt: prev && prev.id === payload.taskId ? prev.timerStartedAt : prev?.timerStartedAt,
         maxSeconds: prev && prev.id === payload.taskId ? prev.maxSeconds : prev?.maxSeconds,
+        todaySeconds: prev && prev.id === payload.taskId ? prev.todaySeconds : prev?.todaySeconds,
+        totalSeconds: prev && prev.id === payload.taskId ? prev.totalSeconds : prev?.totalSeconds,
       }));
     });
     const offCtx = EventsOn('context:tick', (payload) => {
@@ -264,12 +268,15 @@ export default function App() {
         color: prev && prev.id === payload.contextId ? prev.color : prev?.color,
         elapsed: payload.elapsed,
         elapsedSeconds: prev && prev.id === payload.contextId ? prev.elapsedSeconds : prev?.elapsedSeconds,
+        totalSeconds: prev && prev.id === payload.contextId ? prev.totalSeconds : prev?.totalSeconds,
         timerStartedAt: prev && prev.id === payload.contextId ? prev.timerStartedAt : prev?.timerStartedAt,
         maxSeconds: prev && prev.id === payload.contextId ? prev.maxSeconds : prev?.maxSeconds,
         dailyTargetSeconds: prev && prev.id === payload.contextId ? prev.dailyTargetSeconds : prev?.dailyTargetSeconds,
         recurrence: prev && prev.id === payload.contextId ? prev.recurrence : prev?.recurrence,
         todaySeconds: prev && prev.id === payload.contextId ? prev.todaySeconds : prev?.todaySeconds,
         weekSeconds: prev && prev.id === payload.contextId ? prev.weekSeconds : prev?.weekSeconds,
+        tasksTodaySeconds: prev && prev.id === payload.contextId ? prev.tasksTodaySeconds : prev?.tasksTodaySeconds,
+        tasksTotalSeconds: prev && prev.id === payload.contextId ? prev.tasksTotalSeconds : prev?.tasksTotalSeconds,
       }));
     });
     return () => { off?.(); offCtx?.(); };

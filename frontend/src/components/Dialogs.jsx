@@ -171,7 +171,10 @@ export function TaskSheet({ t, open, onClose, task, horizons, contexts, activeHo
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
               <History size={15} className="text-muted-foreground" />
               {t.timeLog}
-              <span className="tabular ms-auto text-xs font-bold text-emerald-300">{formatHMS(task.elapsedSeconds || 0)}</span>
+              <span className="tabular ms-auto text-xs font-bold text-emerald-300" title={`${t.todayTime || t.todayLabel || 'Today'}: ${formatHMS(task.todaySeconds || 0)} · ${t.totalLabel || 'Total'}: ${formatHMS((task.totalSeconds ?? task.elapsedSeconds) || 0)}`}>
+                {formatHMS(task.todaySeconds || 0)}
+                <span className="ms-1.5 font-medium text-muted-foreground">· {t.totalLabel || 'Total'} {formatHMS((task.totalSeconds ?? task.elapsedSeconds) || 0)}</span>
+              </span>
             </div>
             {(entries || []).length === 0 ? (
               <p className="text-xs leading-relaxed text-muted-foreground">{t.noSessions}</p>
