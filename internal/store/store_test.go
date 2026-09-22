@@ -61,6 +61,51 @@ func TestDataDirNotEmpty(t *testing.T) {
 	}
 }
 
+func TestListTasksContextFilter(t *testing.T) {
+	s := openTestStore(t)
+	ctx, err := s.CreateContext("Ctx", "#3b82f6")
+	if err != nil {
+		t.Fatalf("create context: %v", err)
+	}
+	if _, err := s.CreateTask(TaskInput{Title: "with ctx", ContextID: &ctx.ID}); err != nil {
+		t.Fatalf("create with-ctx task: %v", err)
+	}
+	if _, err := s.CreateTask(TaskInput{Title: "no ctx"}); err != nil {
+		t.Fatalf("create no-ctx task: %v", err)
+	}
+	count := func(f TaskFilter) int {
+		t.Helper()
+		tasks, err := s.ListTasks(f)
+		if err != nil {
+			t.Fatalf("list %+v: %v", f, err)
+		}
+		return len(tasks)
+	}
+	if n := count(TaskFilter{Horizon: "all", ContextID: "all"}); n != 2 {
+		t.Fatalf("all = %d, want 2", n)
+	}
+	if n := count(TaskFilter{Horizon: "all", ContextID: "with-context"}); n != 1 {
+		t.Fatalf("with-context = %d, want 1", n)
+	}
+	if n := count(TaskFilter{Horizon: "all", ContextID: "none"}); n != 1 {
+		t.Fatalf("none = %d, want 1", n)
+	}
+	got, err := s.ListTasks(TaskFilter{Horizon: "all", ContextID: "with-context"})
+	if err != nil {
+		t.Fatalf("list with-context: %v", err)
+	}
+	if got[0].Title != "with ctx" {
+		t.Fatalf("with-context returned %q", got[0].Title)
+	}
+	got, err = s.ListTasks(TaskFilter{Horizon: "all", ContextID: "none"})
+	if err != nil {
+		t.Fatalf("list none: %v", err)
+	}
+	if got[0].Title != "no ctx" {
+		t.Fatalf("none returned %q", got[0].Title)
+	}
+}
+
 func TestContextGoalParallelTimers(t *testing.T) {
 	s := openTestStore(t)
 	// Seed data uses "Work"; use a fresh context as the goal.

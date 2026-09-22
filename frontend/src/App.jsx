@@ -54,7 +54,9 @@ export default function App() {
   const [activeHorizon, setActiveHorizon] = React.useState('short');
   const [view, setView] = React.useState('kanban');
   const [focusOnly, setFocusOnly] = React.useState(false);
-  const [contextFilter, setContextFilter] = React.useState('all');
+  // 'with-context' = tasks belonging to any context ("All contexts");
+  // 'none' = tasks with no context; a concrete id = one context.
+  const [contextFilter, setContextFilter] = React.useState('with-context');
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [search, setSearch] = React.useState('');
 
@@ -337,9 +339,8 @@ export default function App() {
   }, []);
 
   const refresh = React.useCallback(async () => {
-    const f = { horizon: 'all', status: 'all', contextId: 'all', focusOnly: false, search: '' };
+    const f = { horizon: 'all', status: 'all', contextId: contextFilter, focusOnly: false, search: '' };
     if (focusOnly) f.focusOnly = true;
-    if (contextFilter !== 'all') f.contextId = contextFilter;
     if (statusFilter !== 'all') f.status = statusFilter;
     if (search.trim()) f.search = search.trim();
     const [all, board, st] = await Promise.all([
@@ -564,9 +565,8 @@ export default function App() {
   }, [search]);
   React.useEffect(() => {
     if (!ready) return;
-    const f = { horizon: 'all', status: 'all', contextId: 'all', focusOnly: false, search: '' };
+    const f = { horizon: 'all', status: 'all', contextId: contextFilter, focusOnly: false, search: '' };
     if (focusOnly) f.focusOnly = true;
-    if (contextFilter !== 'all') f.contextId = contextFilter;
     if (statusFilter !== 'all') f.status = statusFilter;
     if (debounced.trim()) f.search = debounced.trim();
     ListTasks(f).then((b) => setTasks(b || [])).catch(() => {});
@@ -987,8 +987,8 @@ export default function App() {
   }
 
   const boardTasks = tasks.filter((x) => x.horizon === activeHorizon);
-  const hasFilters = focusOnly || contextFilter !== 'all' || statusFilter !== 'all' || search.trim();
-  const clearFilters = () => { setFocusOnly(false); setContextFilter('all'); setStatusFilter('all'); setSearch(''); };
+  const hasFilters = focusOnly || contextFilter !== 'with-context' || statusFilter !== 'all' || search.trim();
+  const clearFilters = () => { setFocusOnly(false); setContextFilter('with-context'); setStatusFilter('all'); setSearch(''); };
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
@@ -1237,7 +1237,7 @@ export default function App() {
         }}
         onDeleteContext={async (d) => {
           await DeleteContext(d.id);
-          if (contextFilter === d.id) setContextFilter('all');
+          if (contextFilter === d.id) setContextFilter('with-context');
           await refresh();
         }}
         dbPath={dbPath}

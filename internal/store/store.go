@@ -1062,7 +1062,13 @@ func (s *Store) ListTasks(f TaskFilter) ([]TaskDetail, error) {
 		conds = append(conds, "t.status=?")
 		args = append(args, f.Status)
 	}
-	if f.ContextID != "" && f.ContextID != "all" {
+	if f.ContextID == "none" {
+		// tasks with no context at all
+		conds = append(conds, "t.context_id IS NULL")
+	} else if f.ContextID == "with-context" {
+		// tasks belonging to any context ("All contexts")
+		conds = append(conds, "t.context_id IS NOT NULL")
+	} else if f.ContextID != "" && f.ContextID != "all" {
 		conds = append(conds, "t.context_id=?")
 		args = append(args, f.ContextID)
 	}

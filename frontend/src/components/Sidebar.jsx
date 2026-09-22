@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass, Play, Pause, Activity } from 'lucide-react';
+import { CalendarDays, CalendarRange, Rocket, Star, Settings2, Plus, Database, Power, Languages, Timer, Flag, Target, Compass, Hourglass, Play, Pause, Activity, CircleDashed } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Progress } from './ui/form';
 import { horizonName, horizonDesc, formatHMS } from '../lib/i18n';
@@ -221,14 +221,24 @@ export function Sidebar({
           </div>
           <div className="space-y-0.5">
             <button
-              onClick={() => onContextFilter('all')}
+              onClick={() => onContextFilter('with-context')}
               className={cn(
                 'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
-                contextFilter === 'all' ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+                contextFilter === 'with-context' ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
               )}
             >
               <span className="size-2.5 rounded-full bg-muted-foreground/60" />
               <span className="flex-1 text-start">{t.allContexts}</span>
+            </button>
+            <button
+              onClick={() => onContextFilter(contextFilter === 'none' ? 'with-context' : 'none')}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+                contextFilter === 'none' ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+              )}
+            >
+              <CircleDashed size={13} className="ms-0.5 shrink-0 opacity-70" />
+              <span className="flex-1 text-start">{t.noContext}</span>
             </button>
             {contexts.map((c) => (
               <ContextGoalRow
@@ -237,7 +247,7 @@ export function Sidebar({
                 lang={lang}
                 c={c}
                 selected={contextFilter === c.id}
-                onFilter={() => onContextFilter(c.id === contextFilter ? 'all' : c.id)}
+                onFilter={() => onContextFilter(c.id === contextFilter ? 'with-context' : c.id)}
                 onStart={() => onStartContext?.(c)}
                 onPause={() => onPauseContext?.(c)}
               />
