@@ -66,32 +66,6 @@ func validActivityCategory(c string) string {
 	}
 }
 
-// ensureActivityTable is called from migrate()'s statement list indirectly —
-// the CREATE lives in store.go; this helper only guards older DBs.
-func (s *Store) ensureActivityTable() error {
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS activity_segments (
-		id TEXT PRIMARY KEY,
-		app TEXT NOT NULL DEFAULT '',
-		title TEXT NOT NULL DEFAULT '',
-		detail TEXT NOT NULL DEFAULT '',
-		domain TEXT NOT NULL DEFAULT '',
-		category TEXT NOT NULL DEFAULT 'other',
-		started_at TEXT NOT NULL,
-		ended_at TEXT,
-		seconds INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL
-	);`)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_activity_started ON activity_segments(started_at)`)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_activity_app ON activity_segments(app)`)
-	return err
-}
-
 // RecordActivitySegment persists one finished foreground run. Durations under
 // minSeconds are dropped (polling noise); longer runs are stored whole.
 func (s *Store) RecordActivitySegment(app, title, detail, domain, category, startedAt, endedAt string, seconds int64) (ActivitySegment, error) {
@@ -350,5 +324,3 @@ func (s *Store) ActivityDayTotal(category, day string) int64 {
 	}
 	return 0
 }
-
-var _ = time.Now
